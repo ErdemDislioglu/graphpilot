@@ -30,6 +30,7 @@ import { computeEpicDone } from "./epicStatus.js";
 import { runScaffold } from "./scaffold.js";
 import { computeAgentStats } from "./agentStats.js";
 import { computeAblationRows, renderAblationMarkdown } from "./ablation.js";
+import { parseTranscriptUsage, summarizeTranscript } from "./metricsIngest.js";
 import { loadFastConfig } from "./hooks/fastConfig.js";
 import { computeTrimmedBashOutput } from "./hooks/trimBash.js";
 import { computeTrackToolUse } from "./hooks/trackToolUse.js";
@@ -591,6 +592,42 @@ export function buildCli(): Command {
       );
     }),
   );
+
+  const metricsCmd = program
+    .command("metrics")
+    .description("Faz 8.1: token/maliyet ölçüm araçları");
+
+  metricsCmd
+    .command("ingest")
+    .description(
+      "Bir transcript JSONL dosyasından gerçek token kullanımını çıkarır (SPEC §13, ADR-012)",
+    )
+    .argument("<transcriptPath>", "transcript .jsonl dosyasının yolu")
+    .option("--json", "makine-okur JSON çıktı")
+    .action(
+      action((transcriptPath: string, opts: { json?: boolean }) => {
+        const content = readFileSync(transcriptPath, "utf-8");
+        const turns = parseTranscriptUsage(content);
+        const summary = summarizeTranscript(turns);
+        if (opts.json) {
+          console.log(JSON.stringify(summary, null, 2));
+          return;
+        }
+        console.log(`${summary.turns} gerçek model turu bulundu.`);
+        for (const [model, s] of Object.entries(summary.byModel)) {
+          console.log(
+            `  ${model}: ${s.turns} tur, input≈${s.inputTokens}, output≈${s.outputTokens}, cache_read≈${s.cacheReadInputTokens}`,
+          );
+        }
+        console.log(
+          `Toplam: input≈${summary.totalInputTokens}, output≈${summary.totalOutputTokens}, ` +
+            `cache_creation≈${summary.totalCacheCreationInputTokens}, cache_read≈${summary.totalCacheReadInputTokens}`,
+        );
+        if (summary.cacheReadRatio !== null) {
+          console.log(`Cache okuma oranı: %${(summary.cacheReadRatio * 100).toFixed(1)}`);
+        }
+      }),
+    );
 
   const fixLoopCmd = program
     .command("fix-loop")

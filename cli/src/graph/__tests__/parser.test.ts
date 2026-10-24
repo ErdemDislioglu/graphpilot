@@ -110,4 +110,23 @@ describe("parseGraph — bozuk girdiler parseErrors'a düşer, süreci düşürm
   it("bulunmayan graph kökünde anlamlı hata fırlatır", () => {
     expect(() => parseGraph("/kesinlikle/yok/boyle/bir/yol")).toThrow(/bulunamadı/);
   });
+
+  it("Faz 8 pilot koşusunda bulunan gerçek bug: _runtime/*.context.md düğüm gibi parse edilmemeli", () => {
+    // gp context'in ürettiği gerçek bir context dosyasının geçerli bir graph frontmatter'ı
+    // (kind alanı) YOKTUR — gerçek bir /gp:run döngüsünde context HER ZAMAN validate'ten
+    // önce çalışır (SKILL.md 2 → 4.1), bu yüzden bu kombinasyon kaçınılmaz.
+    const graph = withTempGraph((dir) => {
+      writeFileSync(
+        join(dir, "a.md"),
+        "---\nid: E01\nkind: epic\nname: a\nsummary: s\nstatus: pending\nexpanded: false\n---\n",
+      );
+      mkdirSync(join(dir, "_runtime"));
+      writeFileSync(
+        join(dir, "_runtime/E01-F01-T01.context.md"),
+        "## brief\n\niçerik\n\n---\n\n## node\n\n```yaml\nid: \"E01-F01-T01\"\n```\n",
+      );
+    });
+    expect(graph.parseErrors).toEqual([]);
+    expect(graph.nodesById.size).toBe(1);
+  });
 });

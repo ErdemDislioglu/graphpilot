@@ -119,9 +119,19 @@ export function parseGraph(graphRootDir: string): Graph {
   };
 }
 
+/**
+ * Faz 8 pilot koşusunda bulunan GERÇEK bug: `_runtime/` içindeki `gp context`'in ürettiği
+ * `<id>.context.md` dosyaları düğüm gibi parse edilmeye çalışılıyordu (geçerli frontmatter'ı
+ * yok, `kind` eksik → parseError). Gerçek bir `/gp:run` döngüsünde `gp context` HER ZAMAN
+ * `gp validate`'ten önce çalışır (SKILL.md adım 2 → adım 4.1) — yani bu, test fixture'larında
+ * hiç rastlanmayan ama her gerçek koşuda olacak bir kombinasyondu.
+ */
+const SKIPPED_DIR_NAMES = new Set(["_runtime"]);
+
 function listMarkdownFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && SKIPPED_DIR_NAMES.has(entry.name)) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...listMarkdownFiles(full));
     else if (entry.name.endsWith(".md")) out.push(full);

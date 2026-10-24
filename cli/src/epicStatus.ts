@@ -2,7 +2,7 @@ import type { Graph } from "./graph/types.js";
 
 export interface EpicDoneResult {
   epicId: string;
-  /** Epic altındaki TÜM feature/task'lar `status: done` ise `true`. */
+  /** Epic altındaki TÜM task'lar `status: done` ise `true`. */
   done: boolean;
   total: number;
   doneCount: number;
@@ -10,20 +10,27 @@ export interface EpicDoneResult {
 
 /**
  * Faz 7.2 — "Repo-map her epic sonunda yeniden üretilir". Orkestratör (`/gp:run`), bir
- * task'ı `done` işaretledikten sonra bunu çağırır: epic'in TÜM feature/task'ları
- * bitmişse `gp repomap`'i yeniden çalıştırır (kod gerçekten değişti, harita bayatlamasın).
- * Epic kendisi `expanded:false` ya da hiç feature/task'ı yoksa `done:false` döner (henüz
- * genişletilmemiş epic "bitti" sayılmaz).
+ * task'ı `done` işaretledikten sonra bunu çağırır: epic'in TÜM task'ları bitmişse
+ * `gp repomap`'i yeniden çalıştırır (kod gerçekten değişti, harita bayatlamasın).
+ * Epic kendisi hiç task'ı yoksa `done:false` döner (henüz genişletilmemiş epic
+ * "bitti" sayılmaz).
+ *
+ * ❗ Faz 8 pilot koşusunda bulunan gerçek bug — **sadece task'lar** sayılır, feature'lar
+ * DEĞİL: hiçbir mekanizma bir feature'ın `status`'unu otomatik `done`'a çevirmiyor (sadece
+ * task'lar `gp set ... status=done` ile elle/orkestratör tarafından işaretlenir) — feature'ları
+ * da sayan ilk sürüm, epic'in tüm task'ları bitse de hep `done:false` döndürüyordu
+ * (`indexGen.ts`'in `formatProgress`'u da zaten aynı sebeple sadece `tasksOf` kullanıyordu —
+ * tutarlı hale getirildi).
  */
 export function computeEpicDone(graph: Graph, epicId: string): EpicDoneResult {
-  const members = [...graph.nodesById.values()].filter(
-    (n) => n.epicId === epicId && (n.kind === "feature" || n.kind === "task"),
+  const tasks = [...graph.nodesById.values()].filter(
+    (n) => n.epicId === epicId && n.kind === "task",
   );
-  const doneCount = members.filter((n) => n.frontmatter.status === "done").length;
+  const doneCount = tasks.filter((n) => n.frontmatter.status === "done").length;
   return {
     epicId,
-    done: members.length > 0 && doneCount === members.length,
-    total: members.length,
+    done: tasks.length > 0 && doneCount === tasks.length,
+    total: tasks.length,
     doneCount,
   };
 }

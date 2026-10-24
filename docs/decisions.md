@@ -396,6 +396,83 @@ gerçek paralel bir `/gp:run` koşusunda `agent_id`'nin node'a göre nasıl dağ
   ediyor, ama JSON GİRDİSİ testte elle kurulmuş (gerçek Claude Code'un göndereceği ANLIK
   gerçek alan isimleri değil).
 
+## ADR-012 — Transcript JSONL şeması: gerçek oturum kayıtlarından ücretsiz doğrulama
+
+**Tarih:** 2026-10-24 · **Durum:** Kabul edildi · **Faz:** 8.1
+
+### Bağlam
+Faz 8.1'in ❗ bloke eden maddesi: `usage` alanının tam adları bilinmeden `gp metrics
+ingest` yazılamaz (research.md Açık Soru #4). Bunu çözmenin "gerçek koşu" yolu —
+yeni bir `claude -p` çağrısı yapıp çıktısını incelemek — onaysız gerçek kullanım
+harcardı (Faz 6/7'de tekrarlanan aynı kısıt).
+
+### Karar
+**Yeni bir çağrı yapmaya gerek yoktu.** Bu projenin kendi geliştirme oturumları zaten
+`~/.claude/projects/<proje-slug>/<session-id>.jsonl` altında duruyor — bunlar
+**zaten var olan, tekrar ücretlendirilmeyen** kayıtlar. Üç gerçek transcript dosyası
+(toplam 4351 satır) `python3`/`jq` ile incelendi; `message.usage` alanları ve
+`toolUseResult` araç-sonucu şekilleri gerçek veriyle çıkarıldı. Ayrıntı: `docs/SPEC.md` §13.
+
+### Gerekçe
+"Gerçek kullanım onaysız harcanmaz" ilkesi (Faz 6/7) **yeni** çağrılar için geçerli —
+zaten olmuş, kaydedilmiş geçmiş oturumları okumak hiçbir ek maliyet/harcama
+doğurmuyor. Bu, Faz 8'in "ölçüm" kısmının önemli bir bölümünün aslında SIFIR maliyetle
+yapılabileceğini gösteriyor: bu projenin kendi gelişim sürecinin transcript'leri zaten
+bir benchmark veri kaynağı.
+
+### Sonuçlar
+- ✅ `docs/SPEC.md` §13 ve research.md Açık Soru #4 güncellendi — artık DOĞRULANDI.
+- ⚠️ Doğrulanan alanlar bu oturumda görülen Claude Code sürümüyle (`2.1.265`+) sınırlı;
+  resmi olarak yayınlanmayan bir iç format olduğu için sürümler arası değişebilir.
+  `gp metrics ingest` bilinmeyen/eksik alanlara karşı toleranslı yazılmalı.
+- ⚠️ Hâlâ doğrulanmayan: hook'un `PostToolUse` `tool_response`'unun transcript'in
+  `toolUseResult`'ıyla birebir aynı şekilde olduğu (ADR-011) — bu ikisi ayrı
+  serileştirme noktaları, sadece GÜÇLÜ dolaylı kanıt var.
+- ⚠️ `total_cost_usd` (maliyet) hâlâ transcript'te YOK — `claude -p --output-format
+  json`'ın kendi çıktısından geliyor, bu ADR'nin kapsamadığı ayrı bir doğrulama.
+
+## ADR-013 — Subagent transcript'leri ayrı dosyada; `isSidechain` İŞE YARAMAZ (gerçek pilot koşusundan)
+
+**Tarih:** 2026-10-24 · **Durum:** Kabul edildi · **Faz:** 8.1/8.4 (ilk gerçek `/gp:run` pilotu)
+
+### Bağlam
+ADR-011/012'nin bıraktığı açık soru: "düğüm başına" token ölçümü için bir subagent'ın
+turlarını ana thread'in turlarından nasıl ayırırız? `isSidechain` alanı bir aday gibi
+görünüyordu (transcript şemasında var) ama hiçbir geçmiş oturumda `true` görülmemişti
+(Agent tool hiç kullanılmamıştı). Bu oturumda Faz 8'in ilk küçük-ölçekli pilot
+benchmark'ında (2 gerçek Agent tool çağrısı — coder + tester, "kucuk" senaryosu) bu
+ilk kez gerçekten test edildi.
+
+### Karar
+**`isSidechain` ana session dosyasında HİÇ `true` olmuyor** (iki gerçek subagent
+çağrısına rağmen main dosyada 0 sidechain satırı). Gerçek mekanizma farklı: her
+subagent çağrısı **ayrı bir dosyaya** yazılıyor —
+`~/.claude/projects/<proje-slug>/<ana-session-id>/subagents/agent-<agentId>.jsonl`
+(Agent tool'un kendi sonuç mesajındaki `output_file` alanı tam olarak bu dosyaya
+symlink). `gp metrics ingest` bu dosyaya doğrudan verilebilir — ayrıca bir filtreleme
+gerekmez, dosyanın KENDİSİ zaten sadece o subagent'ın turlarını içeriyor.
+
+Gerçek ölçüm (bu pilotun T01/T02'si): T01 (coder) 18 gerçek tur, T02 (tester) 15 gerçek
+tur; her ikisi de `claude-sonnet-5`. Cache okuma oranları sırasıyla %88.0 ve %93.9.
+
+### Gerekçe
+Tahmin etmek yerine gerçek bir Agent tool çağrısıyla test edildi — ADR-011'in
+"agent_id=düğüm" varsayımı farklı bir mekanizma (hook `agent_id` alanı) için yapılmıştı,
+bu onun yerine geçmiyor, AYRICA bir doğrulama. Artık transcript-bazlı "düğüm başına"
+ölçüm için GÜVENİLİR bir yöntem var: subagent'ın kendi `output_file`'ını `gp metrics
+ingest`'e ver.
+
+### Sonuçlar
+- ✅ `gp metrics ingest <agent-output-file>` doğrudan düğüm-bazlı ölçüm için kullanılabilir
+  — Faz 8.1'in "düğüm başına kayıt" maddesi artık net bir uygulama yoluna sahip.
+- ⚠️ Agent'ın kendi sonuç mesajındaki `<usage><subagent_tokens>...</subagent_tokens></usage>`
+  alanı (T01: 53412, T02: 51763) transcript'ten `gp metrics ingest`'in hesapladığı ham
+  toplamla (T01: input+cache_creation+cache_read+output ≈ 850K) **BİREBİR UYUŞMUYOR** —
+  ikisi farklı şeyler ölçüyor olabilir (ör. `subagent_tokens` maliyet-ağırlıklı/efektif bir
+  sayı, cache_read'i tam ağırlıkta saymıyor olabilir). Bu fark DOĞRULANMADI, Faz 8.2
+  (maliyet hesabı) bu iki kaynağı uzlaştırmalı.
+- ⚠️ Yol, bu oturumda görülen Claude Code sürümüyle sınırlı, resmi API değil — değişebilir.
+
 ---
 
 ## Bekleyen kararlar

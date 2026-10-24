@@ -348,3 +348,73 @@ knowledge düğümünü okur (`reads: ["[[catalog-api]]"]`) ve feature düzeyind
 (`depends_on: [E01-F01]`).
 
 INDEX.md / _index.md **dahil edilmedi** (§9 — otomatik üretilir, elle tutmak drift riski).
+
+---
+
+## 13. Transcript JSONL şeması — token/maliyet ölçümü (Faz 8.1)
+
+> **Kaynak — gerçek veri, tahmin değil:** Bu bölüm research.md Açık Soru #4'ü kapatır.
+> Alan adları, bu projenin kendi geliştirme oturumlarının gerçek transcript dosyaları
+> (`~/.claude/projects/<proje-slug>/<session-id>.jsonl`) `python3`/`jq` ile incelenerek
+> çıkarıldı (2026-10-24) — **hiçbir yeni API çağrısı yapılmadı**, zaten var olan
+> oturum kayıtları okundu. Claude Code sürümü: bu oturumda görülen `version` alanı
+> `2.1.265`+; **resmi dokümanda bu şema yayınlanmaz, sürümler arası değişebilir** —
+> `gp metrics ingest` eksik/yeni alanlara karşı toleranslı olmalı (bilinmeyen alan →
+> yoksay, kritik alan eksikse o satırı atla, tüm ingest'i düşürme).
+
+### Dosya biçimi
+Her satır bağımsız bir JSON objesi (JSONL). İlgili satır tipleri: `"type": "assistant"`
+(model yanıtı, `usage` içerir) ve `"type": "user"` (araç sonucu, `toolUseResult` içerir).
+
+### `type: "assistant"` — üst seviye alanlar (doğrulanan alt küme)
+`parentUuid`, `uuid`, `timestamp`, `session_id`/`sessionId`, `version`, `cwd`, `gitBranch`,
+`effort`, `message: { id, model, role, stop_reason, content, usage }`.
+
+❗ `message.model` bazı satırlarda `"<synthetic>"` olabilir (hata/sistem mesajı, ör.
+`"Login expired"`) — **gerçek bir model çağrısı değildir**, `usage` alanları hep `0`'dır.
+`gp metrics ingest` bu satırları filtrelemeli (`model !== "<synthetic>"`).
+
+### `message.usage` — gerçek alan adları (DOĞRULANDI)
+```json
+{
+  "input_tokens": 2,
+  "output_tokens": 141,
+  "cache_creation_input_tokens": 4195,
+  "cache_read_input_tokens": 39020,
+  "output_tokens_details": { "thinking_tokens": 11 },
+  "server_tool_use": { "web_search_requests": 0, "web_fetch_requests": 0 },
+  "service_tier": "standard",
+  "cache_creation": { "ephemeral_1h_input_tokens": 4195, "ephemeral_5m_input_tokens": 0 },
+  "inference_geo": "global",
+  "speed": "standard",
+  "iterations": [ { "input_tokens": 2, "output_tokens": 141, "...": "aggregate alanların turlara göre kırılımı" } ]
+}
+```
+- Faz 7.1'in cache okuma oranı ölçümü artık yapılabilir: `cache_read_input_tokens /
+  (input_tokens + cache_creation_input_tokens + cache_read_input_tokens)`.
+- ❗ Bu satırda **maliyet (USD) alanı YOK** — ADR-004'ü doğruluyor: maliyet transcript'ten
+  değil, `claude -p --output-format json`'ın `total_cost_usd`'sinden gelir (ayrı kaynak).
+
+### `type: "user"` → `toolUseResult` — araç sonucu şekli (gözlenen, araca göre değişir)
+Gerçek bir oturumda gözlenen şekiller (en sık görülenden az görülene):
+
+| Araç | `toolUseResult` anahtarları |
+|---|---|
+| Bash | `interrupted, isImage, noOutputExpected, stderr, stdout` (bazen + `staleReadFileStateHint` ya da `returnCodeInterpretation`) |
+| Edit | `filePath, newString, oldString, originalFile, replaceAll, structuredPatch, userModified` |
+| Write | `content, filePath, originalFile, structuredPatch, type, userModified` |
+| Read | `file, type` |
+| WebSearch | `durationSeconds, query, results, searchCount` |
+| (düz metin dönen araçlar) | tek bir string |
+
+→ **ADR-011'i güçlendiriyor:** `cli/src/hooks/trimBash.ts`'in savunmacı `extractText()`'i
+zaten `stdout` alanını ÖNCELİKLE deniyor — bu gerçek veriyle uyumlu. **Hâlâ tam
+DOĞRULANMAMIŞ olan:** hook'un `PostToolUse` olayında gönderdiği `tool_response` alanının
+BU `toolUseResult` ile birebir aynı şekilde olduğu — ikisi aynı alt sistemden geliyor ama
+ayrı serileştirme noktaları; gerçek bir hook ateşlemesiyle çapraz doğrulanmadı.
+
+### `gp metrics ingest` için pratik sonuç
+- `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` = toplam input
+- `output_tokens` = toplam output
+- Maliyet hesaplamak için model başına birim fiyat × bu sayılar (Faz 8.2'nin fiyat
+  tablosuyla) — transcript'in kendisi maliyeti HESAPLAMAZ, sadece ham sayıları verir.
