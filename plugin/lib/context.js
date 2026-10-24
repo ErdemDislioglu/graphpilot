@@ -4,6 +4,7 @@ import { estimateTokens } from "./tokens.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 import { generateEpicIndex } from "./indexGen.js";
 import { getDependsOn, getReads } from "./graph/types.js";
+import { scanForSecretLikeContent } from "./secretScan.js";
 /**
  * SPEC/roadmap 2.8 — EN KRİTİK komut. Paket **sabit sırada** kurulur (prompt caching
  * buna bağlı, bu sıra ASLA değiştirilmemeli):
@@ -58,9 +59,22 @@ export function buildContext(graph, nodeId, config) {
         parts: partSummaries,
     };
 }
-/** `gp context <id>`: paketi üretir VE `.graph/_runtime/<id>.context.md`'ye yazar. */
+/**
+ * `gp context <id>`: paketi üretir VE `.graph/_runtime/<id>.context.md`'ye yazar.
+ *
+ * Roadmap 9.7 — ".env ve gizli dosyalar bağlam paketine asla girmez." Yazmadan ÖNCE
+ * taranır; eşleşme varsa dosya YAZILMAZ ve hata fırlatılır (sessizce göndermek yerine
+ * gürültülü durmak — "asla girmez" bir enforcement'tır, sadece bir dilek değil).
+ * Gerçek sır değeri hata mesajına KONMAZ (`secretScan.ts`'in kendi kırpması).
+ */
 export function writeContextFile(graph, nodeId, config) {
     const result = buildContext(graph, nodeId, config);
+    const scan = scanForSecretLikeContent(result.markdown);
+    if (scan.found) {
+        throw new Error(`${nodeId}: bağlam paketinde sır gibi görünen içerik bulundu, YAZILMADI — ` +
+            scan.matches.map((m) => `${m.label} (${m.redactedSnippet})`).join(", ") +
+            ". Bilgi düğümlerinde/brief'te gerçek anahtar/şifre olmamalı — kaynağı bulup düzelt.");
+    }
     const outPath = join(graph.rootDir, "_runtime", `${nodeId}.context.md`);
     writeFileAtomic(outPath, result.markdown);
     return result;

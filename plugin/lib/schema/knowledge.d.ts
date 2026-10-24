@@ -19,6 +19,7 @@ export declare const KnowledgeFrontmatterShape: z.ZodObject<{
     }>;
     updated_by: z.ZodDefault<z.ZodArray<z.ZodString>>;
     source_files: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    source_hashes: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$strict>;
 /** Bağımsız doğrulama için: yukarıdaki şekil + `id === name` kuralı. */
 export declare const KnowledgeFrontmatterSchema: z.ZodObject<{
@@ -32,5 +33,6 @@ export declare const KnowledgeFrontmatterSchema: z.ZodObject<{
     }>;
     updated_by: z.ZodDefault<z.ZodArray<z.ZodString>>;
     source_files: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    source_hashes: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$strict>;
 export type KnowledgeFrontmatter = z.infer<typeof KnowledgeFrontmatterShape>;

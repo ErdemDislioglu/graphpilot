@@ -76,6 +76,20 @@ describe("parseGraph — bozuk girdiler parseErrors'a düşer, süreci düşürm
     }
   }
 
+  it("Faz 9.6 hata enjeksiyonu — sözdizimi BOZUK YAML frontmatter çökmez, parseError'a düşer", () => {
+    const graph = withTempGraph((dir) => {
+      // Kapanmamış köşeli parantez — js-yaml bunu gerçekten reddeder (semantik hata değil,
+      // SÖZDİZİMİ hatası; `parseFrontmatter`'ın try/catch'ini test eder).
+      writeFileSync(join(dir, "bozuk.md"), "---\nid: [E01\nkind: epic\nname: a\n---\n## x\n");
+      writeFileSync(join(dir, "iyi.md"), "---\nid: E02\nkind: epic\nname: b\n---\n## x\n");
+    });
+    expect(graph.parseErrors.length).toBe(1);
+    expect(graph.parseErrors[0].message).toContain("frontmatter parse hatası");
+    // Bozuk dosya diğerini düşürmüyor — iyi.md yine de parse edildi.
+    expect(graph.nodesById.has("E02")).toBe(true);
+    expect(graph.nodesById.has("E01")).toBe(false);
+  });
+
   it("tekrarlanan id iki dosyada da parseError üretir, ikincisini atlar", () => {
     const graph = withTempGraph((dir) => {
       writeFileSync(join(dir, "a.md"), "---\nid: E01\nkind: epic\nname: a\n---\n");

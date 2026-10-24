@@ -72,6 +72,25 @@ const OptimizationsSchema = z
   })
   .strict();
 
+/** Roadmap 9.2 — Mod B'de rate limit/kullanım limiti görülünce bekleyip tekrar deneme. */
+const RateLimitRetrySchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    wait_seconds: z.number().int().positive().default(60),
+    max_retries: z.number().int().positive().default(3),
+  })
+  .strict();
+
+const ModeBSchema = z
+  .object({
+    rate_limit_retry: RateLimitRetrySchema.default({
+      enabled: true,
+      wait_seconds: 60,
+      max_retries: 3,
+    }),
+  })
+  .strict();
+
 export const DEFAULT_OPTIMIZATIONS = {
   cache_friendly_order: true,
   log_trimming: true,
@@ -104,6 +123,9 @@ export const ConfigSchema = z
     // Faz 7.6 eklemesi: `type: scaffold` task'ları için resmi iskelet komutları.
     // Anahtar = task frontmatter'daki `scaffold_stack` (ör. "vite-react"), değer = çalıştırılacak komut.
     scaffold_commands: z.record(z.string(), z.string()).default({}),
+    mode_b: ModeBSchema.default({
+      rate_limit_retry: { enabled: true, wait_seconds: 60, max_retries: 3 },
+    }),
   })
   .passthrough();
 

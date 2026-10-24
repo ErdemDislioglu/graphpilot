@@ -6,6 +6,8 @@ description: >-
 model: sonnet
 tools: Read, Edit, Write, Bash
 omitClaudeMd: true
+experimental:
+  cacheTtl: 1h
 skills:
   - graph-conventions
 ---

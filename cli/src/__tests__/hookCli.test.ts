@@ -110,4 +110,44 @@ describe("gp hook track-tool-use — gerçek CLI süreci", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 20000);
+
+  it("Faz 9.7 — touches dışına Write'ta uyarı verir, içine yazarsa vermez", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gp-hook-test-"));
+    try {
+      mkdirSync(join(dir, ".graph", "_runtime"), { recursive: true });
+      writeFileSync(
+        join(dir, ".graph", "config.yml"),
+        [
+          "routing: [{ when: {}, model: haiku }]",
+          "escalation: [haiku]",
+          "max_attempts_per_model: 1",
+          "budgets: { default_context: 8000, max_turns: 25 }",
+        ].join("\n"),
+      );
+      writeFileSync(
+        join(dir, ".graph", "_runtime", "E01-F01-T01.context.md"),
+        ["## node", "", "```yaml", 'id: "E01-F01-T01"', 'touches: ["src/**"]', "```"].join("\n"),
+      );
+
+      const outside = runHook(["track-tool-use"], {
+        cwd: dir,
+        session_id: "s2",
+        tool_name: "Write",
+        tool_input: { file_path: "other/leaked.ts" },
+      });
+      expect(
+        (outside.hookSpecificOutput as Record<string, unknown>)?.additionalContext,
+      ).toContain("touches");
+
+      const inside = runHook(["track-tool-use"], {
+        cwd: dir,
+        session_id: "s3",
+        tool_name: "Write",
+        tool_input: { file_path: "src/ok.ts" },
+      });
+      expect(inside.hookSpecificOutput).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
 });

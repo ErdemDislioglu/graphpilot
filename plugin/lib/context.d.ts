@@ -23,5 +23,12 @@ export interface ContextResult {
  * Geçişli bağımlılıklar hiç dahil edilmez — `getDependsOn`/`getReads` zaten tek adım.
  */
 export declare function buildContext(graph: Graph, nodeId: string, config: Config): ContextResult;
-/** `gp context <id>`: paketi üretir VE `.graph/_runtime/<id>.context.md`'ye yazar. */
+/**
+ * `gp context <id>`: paketi üretir VE `.graph/_runtime/<id>.context.md`'ye yazar.
+ *
+ * Roadmap 9.7 — ".env ve gizli dosyalar bağlam paketine asla girmez." Yazmadan ÖNCE
+ * taranır; eşleşme varsa dosya YAZILMAZ ve hata fırlatılır (sessizce göndermek yerine
+ * gürültülü durmak — "asla girmez" bir enforcement'tır, sadece bir dilek değil).
+ * Gerçek sır değeri hata mesajına KONMAZ (`secretScan.ts`'in kendi kırpması).
+ */
 export declare function writeContextFile(graph: Graph, nodeId: string, config: Config): ContextResult;

@@ -108,6 +108,13 @@ export declare const ConfigSchema: z.ZodObject<{
         repo_map: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>>;
     scaffold_commands: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
+    mode_b: z.ZodDefault<z.ZodObject<{
+        rate_limit_retry: z.ZodDefault<z.ZodObject<{
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            wait_seconds: z.ZodDefault<z.ZodNumber>;
+            max_retries: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>>;
 }, z.core.$loose>;
 export type Config = z.infer<typeof ConfigSchema>;
 export type Optimizations = z.infer<typeof OptimizationsSchema>;

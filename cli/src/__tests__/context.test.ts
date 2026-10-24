@@ -161,4 +161,20 @@ describe("writeContextFile", () => {
       expect(readFileSync(outPath, "utf-8")).toContain("## node");
     });
   });
+
+  it("Faz 9.7 — sır gibi görünen içerik varsa YAZMAZ, hata fırlatır", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(
+          TASK({ id: "E01-F01-T01", name: "a" }),
+          "## Görev\nSTRIPE_SECRET=sk_live_abcdef1234567890ghij kullan\n",
+        ),
+      },
+      (graph) => {
+        expect(() => writeContextFile(graph, "E01-F01-T01", MINIMAL_CONFIG)).toThrow(/sır/);
+        const outPath = join(graph.rootDir, "_runtime", "E01-F01-T01.context.md");
+        expect(existsSync(outPath)).toBe(false);
+      },
+    );
+  });
 });

@@ -112,5 +112,6 @@ export declare const NodeFrontmatterSchema: z.ZodDiscriminatedUnion<[z.ZodObject
     }>;
     updated_by: z.ZodDefault<z.ZodArray<z.ZodString>>;
     source_files: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    source_hashes: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$strict>], "kind">;
 export type NodeFrontmatter = z.infer<typeof NodeFrontmatterSchema>;

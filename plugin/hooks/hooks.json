@@ -23,7 +23,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Glob|Grep|Write|Bash",
+        "matcher": "Read|Glob|Grep|Write|Edit|Bash",
         "hooks": [
           {
             "type": "command",

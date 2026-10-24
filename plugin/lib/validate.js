@@ -6,6 +6,8 @@ import { buildContext } from "./context.js";
 import { getChildren, tasksOf } from "./graph/types.js";
 const HANDOFF_TOKEN_LIMIT = 300;
 const BRIEF_TOKEN_LIMIT = 1500;
+/** Roadmap 9.5 — bilgi düğümü için önerilen üst sınır (brief'ten gevşek, bkz. yorum). */
+const KNOWLEDGE_TOKEN_LIMIT = 1200;
 const MAX_TASKS_PER_FEATURE = 12;
 /** SPEC/roadmap 5.5 — çok küçük görev heuristiği: Faz 7.5 gerçek birleştirmeyi tasarlayacak. */
 const SMALL_TASK_MAX_TOUCHES = 1;
@@ -112,7 +114,24 @@ export function validateGraph(graph) {
         if (tokens > BRIEF_TOKEN_LIMIT) {
             issues.push({
                 severity: "warning",
-                message: `brief.md ~${tokens} token, sınır ${BRIEF_TOKEN_LIMIT} (SPEC §7)`,
+                message: `brief.md ~${tokens} token, sınır ${BRIEF_TOKEN_LIMIT} (SPEC §7) — her task'ın bağlamına giriyor, özetlenmesi önerilir`,
+            });
+        }
+    }
+    // Roadmap 9.5 — "çok büyük bilgi düğümü → otomatik özetleme önerisi". Brief'ten farklı
+    // olarak bilgi düğümleri sadece `reads` eden task'ların bağlamına girer (tüm graph'a
+    // değil) — bu yüzden sınır daha gevşek (knowledge, Handoff gibi "özet" olması gereken
+    // bir şey, ama brief kadar sık okunmaz).
+    for (const node of graph.nodesById.values()) {
+        if (node.kind !== "knowledge")
+            continue;
+        const tokens = estimateTokens(node.body);
+        if (tokens > KNOWLEDGE_TOKEN_LIMIT) {
+            issues.push({
+                file: node.filePath,
+                nodeId: node.id,
+                severity: "warning",
+                message: `bilgi düğümü ~${tokens} token, önerilen sınır ${KNOWLEDGE_TOKEN_LIMIT} — özetlenmesi önerilir (SPEC §6: "kod kopyalamaz, sadece imza/sözleşme")`,
             });
         }
     }

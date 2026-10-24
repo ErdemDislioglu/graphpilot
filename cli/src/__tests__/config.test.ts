@@ -77,3 +77,23 @@ describe("ConfigSchema — optimizations/scaffold_commands (Faz 7 eklemesi)", ()
     );
   });
 });
+
+describe("ConfigSchema — mode_b.rate_limit_retry (Faz 9.2 eklemesi)", () => {
+  it("hiç verilmezse varsayılan: açık, 60s, 3 retry", () => {
+    expect(ConfigSchema.parse(MINIMAL).mode_b).toEqual({
+      rate_limit_retry: { enabled: true, wait_seconds: 60, max_retries: 3 },
+    });
+  });
+
+  it("kısmen override edilirse diğer alanlar varsayılanda kalır", () => {
+    const result = ConfigSchema.parse({
+      ...MINIMAL,
+      mode_b: { rate_limit_retry: { wait_seconds: 120 } },
+    });
+    expect(result.mode_b.rate_limit_retry).toEqual({
+      enabled: true,
+      wait_seconds: 120,
+      max_retries: 3,
+    });
+  });
+});

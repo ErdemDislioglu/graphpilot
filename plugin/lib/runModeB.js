@@ -1,7 +1,7 @@
-import { spawnSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 const defaultSpawner = (args) => {
     const result = spawnSync("claude", args, { encoding: "utf-8" });
-    return { stdout: result.stdout ?? "", status: result.status };
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
 };
 /**
  * Mod B (6.9, ADR-001) — `claude -p` çağrısının argümanlarını kurar. `--bare`
@@ -27,6 +27,45 @@ export function buildHeadlessArgs(contextMarkdown, agentDef, route) {
 }
 export function runNodeHeadless(contextMarkdown, agentDef, route, spawner = defaultSpawner) {
     const args = buildHeadlessArgs(contextMarkdown, agentDef, route);
-    const { stdout, status } = spawner(args);
-    return { ok: status === 0, stdout, status };
+    const { stdout, stderr, status } = spawner(args);
+    return { ok: status === 0, stdout, stderr: stderr ?? "", status };
+}
+/**
+ * Roadmap 9.2 — "kullanım limiti/rate limit hatasını tanı". ❗ **DOĞRULANMADI:** bu
+ * oturumda gerçek bir 429/kullanım-limiti yanıtı hiç gözlenmedi (research.md Açık Soru
+ * #5 — abonelik kota kuralları hâlâ belirsiz); bu yüzden savunmacı/en-iyi-çaba bir desen
+ * eşleştirmesi — yaygın görülen birkaç anahtar kelimeyi arar. Eşleşme YOKSA normal
+ * başarısızlık sayılır (yanlış pozitiften kaçınmak yanlış negatiften daha güvenli: bir
+ * gerçek hatayı "rate limit" sanıp sonsuz beklemek, bir rate limit'i normal hata sanıp
+ * düğümü yanlışlıkla `failed` işaretlemekten daha kötü sonuç verir).
+ */
+export function isRateLimitSignal(text) {
+    const lower = text.toLowerCase();
+    return (lower.includes("rate limit") ||
+        lower.includes("rate_limit") ||
+        lower.includes("usage limit") ||
+        lower.includes("429") ||
+        (lower.includes("quota") && lower.includes("exceeded")));
+}
+/**
+ * Roadmap 9.2 — rate limit'te "güvenli noktada dur, durumu kaydet" + (Mod B'de)
+ * "bekleyip otomatik yeniden deneme" (`config.yml` ile açılıp kapatılabilir).
+ * `sleep` enjekte edilebilir — testte gerçekten beklemeyi önler.
+ */
+export function runNodeHeadlessWithRetry(contextMarkdown, agentDef, route, opts, spawner = defaultSpawner, 
+// Node'da yerleşik senkron bir uyuma yok; rest of CLI senkron (async/await yok) olduğu
+// için en basit taşınabilir çözüm kabuğun kendi `sleep`'ini çağırmak — testte enjekte edilir.
+sleep = (s) => execSync(`sleep ${s}`)) {
+    let attempts = 0;
+    for (;;) {
+        attempts += 1;
+        const result = runNodeHeadless(contextMarkdown, agentDef, route, spawner);
+        if (result.ok)
+            return { ...result, attempts, rateLimited: false };
+        const rateLimited = isRateLimitSignal(`${result.stdout}\n${result.stderr}`);
+        const canRetry = opts.enabled && rateLimited && attempts <= opts.maxRetries;
+        if (!canRetry)
+            return { ...result, attempts, rateLimited };
+        sleep(opts.waitSeconds);
+    }
 }

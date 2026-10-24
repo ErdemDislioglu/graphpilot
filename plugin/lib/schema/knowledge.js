@@ -20,6 +20,10 @@ export const KnowledgeFrontmatterShape = z
     scope: z.enum(["epic", "shared"]),
     updated_by: z.array(TaskIdSchema).default([]),
     source_files: z.array(z.string()).default([]),
+    // Faz 9.3 eklemesi — `gp sync`'in "kod değişti mi?" karşılaştırması için `source_files`
+    // yazıldığı andaki hash'leri. Anahtar = source_files'taki yol, değer = sha256 (hex).
+    // Elle tutulmaz; sadece `gp sync --update-hashes` yazar.
+    source_hashes: z.record(z.string(), z.string()).default({}),
 })
     .strict();
 /** Bağımsız doğrulama için: yukarıdaki şekil + `id === name` kuralı. */

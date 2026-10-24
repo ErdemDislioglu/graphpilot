@@ -167,6 +167,33 @@ describe("validateGraph — her hata türü için bozuk örnek", () => {
       expect(issues.some((i) => i.message.includes("brief.md"))).toBe(true);
     });
   });
+
+  it("Faz 9.5 — büyük bir bilgi düğümü özetleme uyarısı üretir", () => {
+    const longBody = "x ".repeat(6000); // ~3000 token, KNOWLEDGE_TOKEN_LIMIT(1200)'ü aşar
+    withTempGraph(
+      {
+        "k.md": `---\nid: catalog-api\nkind: knowledge\nname: catalog-api\nsummary: s\nscope: shared\nupdated_by: []\nsource_files: []\n---\n## Özet\n${longBody}\n`,
+      },
+      (graph) => {
+        const issues = validateGraph(graph);
+        const issue = issues.find((i) => i.nodeId === "catalog-api");
+        expect(issue?.severity).toBe("warning");
+        expect(issue?.message).toContain("özetlenmesi önerilir");
+      },
+    );
+  });
+
+  it("Faz 9.5 — küçük bir bilgi düğümü uyarı üretmez", () => {
+    withTempGraph(
+      {
+        "k.md": `---\nid: catalog-api\nkind: knowledge\nname: catalog-api\nsummary: s\nscope: shared\nupdated_by: []\nsource_files: []\n---\n## Özet\nkısa\n`,
+      },
+      (graph) => {
+        const issues = validateGraph(graph);
+        expect(issues.some((i) => i.nodeId === "catalog-api")).toBe(false);
+      },
+    );
+  });
 });
 
 const TASK5 = (overrides: Record<string, unknown>) => ({

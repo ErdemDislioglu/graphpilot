@@ -64,6 +64,11 @@ optimizations:
   repo_map: true
 # scaffold_commands:
 #   vite-react: "npm create vite@latest . -- --template react-ts"
+mode_b:
+  rate_limit_retry:
+    enabled: true
+    wait_seconds: 60
+    max_retries: 3
 `;
 /**
  * `/gp:init` komutunun altında çalışan deterministik kısım (SPEC §1, §7, §10 varsayılanları).

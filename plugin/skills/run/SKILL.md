@@ -17,6 +17,24 @@ argument-hint: "[--epic <id>] [--max-nodes N] [--dry-run]"
 - `--max-nodes N`: en fazla N task bitirince dur.
 - `--dry-run`: hiçbir agent çağırma, sadece ne yapacağını (sıradaki task'lar, modeller) göster.
 
+## 0.5 Başlamadan önce — kaldığı yerden devam (Faz 9.1)
+
+**Eski oturumu ASLA sürdürme** — her `/gp:run` çağrısı yeni, temiz bir oturumdur. Önce:
+```
+node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" resume --json
+```
+Bu ~500 token'lık özeti oku, graph'ın geri kalanını AÇMA. `running kalmış düğümler` boş
+değilse (önceki oturum kesintiye uğramış):
+```
+node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" recover -p <proje-kökü> --json
+```
+Bu, her `running` düğüm için karar verir: `## Yarım iş` notu varsa dokunmaz (döngüye
+`ready` listesinde değil ama context'i okunup devam edilecek — 2. adıma `resume`
+çıktısındaki node ID'siyle direkt geç); notu yoksa commit'lenmemiş değişikliği geri alıp
+`pending`'e döndürür (normal `gp next` akışına girer). `orphanWip` dolu dönerse kullanıcıya
+bildir (squash edilmemiş eski WIP commit'ler — elle temizlik gerekebilir, otomatik
+silinmez).
+
 ## 1. Döngü — her iterasyon
 
 ```
@@ -96,7 +114,12 @@ node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" fix-loop status <id> --json
 
 ## 4. Başarı — Handoff, bilgi güncelleme, commit
 
-1. `gp validate --json` — bu düğümün Handoff'u boş/sınır aşıyorsa hata verir, düzelt.
+1. `gp validate --json` — bu düğümün Handoff'u boş/sınır aşıyorsa hata verir, düzelt:
+   - **Faz 9.5:** "Handoff boş" hatası özel — agent işi bitirdi ama Handoff'u yazmadan
+     durmuş olabilir (tüm bağlamı tekrar vermeye gerek yok). **Bir kez**, haiku ile, SADECE
+     "## Handoff bölümünü doldur (oluşturulan/değişen dosyalar, public arayüz, kararlar,
+     en fazla ~300 token)" talebiyle aynı agent'ı (`route.agent`) çağır — kod yazmasını
+     isteme. Hâlâ boşsa (ikinci denemede de) normal hata politikasına (adım 5) geç, tekrar deneme.
 2. Handoff'un "Bilgi düğümü güncellemeleri" bölümünü oku; ilgili knowledge dosyaları
    varsa **`docs`** agent'ını çağır (haiku) — Handoff'u ve hedef knowledge dosyalarını ver,
    `## Arayüz`/`## Kararlar`'ı güncellesin, `updated_by`'a bu task ID'sini eklesin.
@@ -140,6 +163,19 @@ otomatik çalışır: uzun Bash çıktısını kırpar (`log_trimming`), aynı d
 tekrar edilirse bir uyarı ekler (`turn_limits` — bunu görürsen yaklaşımını gözden
 geçir), ve ölçüm için `.graph/_metrics/tool-use.jsonl`'e kayıt düşer. `.graph/` yoksa ya
 da ilgili `optimizations.*` kapalıysa sessizce hiçbir şey yapmazlar.
+
+## 8. Kullanım limiti / rate limit (Faz 9.2)
+Mode A'da (bu skill'in çalıştığı ana thread) bir Agent tool çağrısı ya da kendi aracın
+kullanım limiti/rate limit benzeri bir hatayla başarısız olursa: düğümü `failed` SAYMA
+(geçici bir kesinti, task'ın hatası değil — ❗ bu senaryonun kesin hata metni/şekli bu
+projede hiç gözlenmedi, DOĞRULANMADI). Düğüm zaten `status: running` (2. adımda
+işaretlendi) — hiçbir şey değiştirme, kullanıcıya kısa bir not bırak ("<id>'den kullanım
+limiti nedeniyle durduruldu, yeni bir oturumda `gp resume` ile devam edilebilir") ve dur.
+Bu senaryo **Faz 9.1'in kaldığı-yerden-devam mekanizmasıyla zaten çözülüyor** — yeni bir
+oturum `gp resume` + gerekirse `gp recover` ile düğümü ya kaldığı yerden devam ettirir
+(agent `## Yarım iş` yazdıysa) ya da güvenle `pending`'e döndürür. Mod B'de (`gp run`)
+aynı senaryo zaten mekanik: `config.yml`'deki `mode_b.rate_limit_retry` ile otomatik
+bekle-ve-tekrar-dene uygulanır, tükenirse düğüm aynı şekilde `running` kalıp süreç durur.
 
 ## Bitirme
 Tüm `ready` tükendi ve genişletilecek bir şey kalmadı → kullanıcıya özet: kaç task done,

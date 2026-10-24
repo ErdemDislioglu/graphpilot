@@ -30,12 +30,16 @@ import { loadFastConfig } from "./hooks/fastConfig.js";
 import { computeTrimmedBashOutput } from "./hooks/trimBash.js";
 import { computeTrackToolUse } from "./hooks/trackToolUse.js";
 import { appendMetric } from "./metrics.js";
+import { decideRunningNodeRecovery, findOrphanWipCommits } from "./recover.js";
+import { computeDeadlockReport } from "./deadlock.js";
+import { checkTouchesViolation, readRunningNodesTouches } from "./hooks/touchesGuard.js";
+import { computeAllKnowledgeSyncReports, defaultFileHashReader, setKnowledgeSourceHashes, } from "./sourceHash.js";
 import { readAgentDefinition } from "./agentFile.js";
-import { runNodeHeadless } from "./runModeB.js";
+import { runNodeHeadlessWithRetry } from "./runModeB.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 import { existsSync, readFileSync } from "node:fs";
 import { ConfigSchema } from "./schema/index.js";
-import { isAbsolute, join, resolve as resolvePath } from "node:path";
+import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execSync } from "node:child_process";
 function loadGraph(opts) {
     return parseGraph(opts.graphRoot);
@@ -217,11 +221,22 @@ export function buildCli() {
         });
     }));
     withGraphRoot(program.command("status").description("Durum özeti")).action(action((opts) => {
-        const summary = computeStatusSummary(loadGraph(opts));
-        output(opts, summary, () => [
+        const graph = loadGraph(opts);
+        const summary = computeStatusSummary(graph);
+        // Faz 9.5 — "hiç ready yok ama bitmemiş düğüm var (deadlock) → raporla".
+        const deadlock = computeDeadlockReport(graph);
+        output(opts, { ...summary, deadlock }, () => [
             `Toplam: ${summary.total}`,
             ...Object.entries(summary.byStatus).map(([k, v]) => `  ${k}: ${v}`),
-        ].join("\n"));
+            deadlock.isDeadlocked
+                ? "\n⚠ DEADLOCK: hiç 'ready' düğüm yok, hiçbir şey çalışmıyor, ama bitmemiş düğüm var:\n" +
+                    deadlock.reasons
+                        .map((r) => `  - ${r.nodeId} → ${r.blockedBy} (${r.blockerStatus}) bekliyor`)
+                        .join("\n")
+                : "",
+        ]
+            .filter(Boolean)
+            .join("\n"));
     }));
     withGraphRoot(program.command("set").description("Frontmatter alanlarını günceller (atomik yazma)"))
         .argument("<id>", "düğüm ID'si")
@@ -351,6 +366,112 @@ export function buildCli() {
     withGraphRoot(program.command("resume").description("Kesinti sonrası ~500 token'lık devam özeti")).action(action((opts) => {
         const summaryMd = buildResumeSummary(loadGraph(opts));
         output(opts, { summary: summaryMd }, () => summaryMd);
+    }));
+    withGraphRoot(program
+        .command("recover")
+        .description("Faz 9.1: status:running kalmış düğümleri çöz (devam et / geri al), yetim WIP commit'leri listele"))
+        .option("-p, --project-root <path>", "git komutlarının çalıştığı kök", ".")
+        .option("--dry-run", "hiçbir değişiklik yapma, sadece ne yapılacağını göster")
+        .action(action((opts) => {
+        const graph = loadGraph(opts);
+        const runningNodes = [...graph.nodesById.values()].filter((n) => n.frontmatter.status === "running");
+        const decisions = runningNodes.map(decideRunningNodeRecovery);
+        const applied = [];
+        for (const d of decisions) {
+            if (d.action !== "revert")
+                continue;
+            if (opts.dryRun) {
+                applied.push({ nodeId: d.nodeId, action: "revert (dry-run, uygulanmadı)" });
+                continue;
+            }
+            const node = graph.nodesById.get(d.nodeId);
+            const touches = Array.isArray(node.frontmatter.touches) ? node.frontmatter.touches : [];
+            for (const pattern of touches) {
+                if (typeof pattern !== "string")
+                    continue;
+                try {
+                    execSync(`git restore -- ${JSON.stringify(pattern)}`, { cwd: opts.projectRoot });
+                }
+                catch {
+                    // Desen hiç değişmemiş olabilir (git restore böyle bir durumda hata verir) — yoksay.
+                }
+            }
+            setFrontmatter(graph, d.nodeId, { status: "pending" });
+            applied.push({ nodeId: d.nodeId, action: "geri alındı → pending" });
+        }
+        const resumingIds = new Set(decisions.filter((d) => d.action === "resume").map((d) => d.nodeId));
+        let orphanWip = [];
+        try {
+            const log = execSync("git log --format=%s", {
+                cwd: opts.projectRoot,
+                encoding: "utf-8",
+            });
+            orphanWip = findOrphanWipCommits(log.split("\n"), resumingIds);
+        }
+        catch {
+            // git deposu yok ya da henüz commit yok — yetim WIP kontrolü atlanır.
+        }
+        output(opts, { decisions, applied, orphanWip }, () => [
+            decisions.length === 0
+                ? "(hiç 'running' kalmış düğüm yok)"
+                : decisions
+                    .map((d) => `${d.action === "resume" ? "▶" : "↩"} ${d.nodeId}: ${d.reason}`)
+                    .join("\n"),
+            orphanWip.length > 0
+                ? `\n⚠ Yetim WIP commit'ler (squash edilmemiş olabilir):\n${orphanWip.map((c) => `  - ${c}`).join("\n")}`
+                : "",
+        ]
+            .filter(Boolean)
+            .join("\n"));
+    }));
+    withGraphRoot(program
+        .command("sync")
+        .description("Faz 9.3: bilgi düğümlerinin source_files'ı ile gerçek kod arasındaki hash farkını listeler"))
+        .option("-p, --project-root <path>", "source_files'ın göreli olduğu kök", ".")
+        .option("--update-hashes", "raporlamak yerine TÜM source_files'ın güncel hash'ini kaydet (elle onaydan sonra kullan)")
+        .action(action((opts) => {
+        const graph = loadGraph(opts);
+        if (opts.updateHashes) {
+            const updated = [];
+            for (const node of graph.nodesById.values()) {
+                if (node.kind !== "knowledge")
+                    continue;
+                const sourceFiles = Array.isArray(node.frontmatter.source_files)
+                    ? node.frontmatter.source_files.filter((f) => typeof f === "string")
+                    : [];
+                if (sourceFiles.length === 0)
+                    continue;
+                const hashes = {};
+                for (const relPath of sourceFiles) {
+                    const hash = defaultFileHashReader(join(opts.projectRoot, relPath));
+                    if (hash !== null)
+                        hashes[relPath] = hash;
+                }
+                const result = setKnowledgeSourceHashes(node, hashes);
+                if (result.ok)
+                    updated.push(node.id);
+            }
+            output(opts, { updated }, () => updated.length === 0
+                ? "(hiç source_files'ı olan knowledge düğümü yok)"
+                : `✓ hash'ler güncellendi: ${updated.join(", ")}`);
+            return;
+        }
+        const reports = computeAllKnowledgeSyncReports(graph, opts.projectRoot).filter((r) => r.files.some((f) => f.state !== "ok"));
+        output(opts, { reports }, () => reports.length === 0
+            ? "✓ Tüm bilgi düğümlerinin source_files'ı hash'leriyle uyumlu (ya da hiç hash kaydı yok)."
+            : reports
+                .map((r) => `${r.nodeId}:\n` +
+                r.files
+                    .filter((f) => f.state !== "ok")
+                    .map((f) => {
+                    if (f.state === "changed")
+                        return `  ⚠ şüpheli: ${f.path} değişmiş (kod güncellendi ama bilgi düğümü güncellenmemiş olabilir)`;
+                    if (f.state === "never-hashed")
+                        return `  · henüz hash'lenmemiş: ${f.path} (ilk kayıt için --update-hashes)`;
+                    return `  ✗ dosya bulunamadı: ${f.path}`;
+                })
+                    .join("\n"))
+                .join("\n"));
     }));
     withGraphRoot(program
         .command("checks")
@@ -505,6 +626,7 @@ export function buildCli() {
         .option("--max-nodes <n>", "en fazla N düğüm işle", (v) => Number(v))
         .action(action((opts) => {
         const results = [];
+        let stoppedByRateLimit = false;
         while (opts.maxNodes === undefined || results.length < opts.maxNodes) {
             const graph = loadGraph(opts);
             const config = loadConfig(graph);
@@ -517,18 +639,41 @@ export function buildCli() {
             const contextMd = readFileSync(join(opts.graphRoot, "_runtime", `${node.id}.context.md`), "utf-8");
             const agentDef = readAgentDefinition(join(opts.agentsDir, `${route.agent}.md`));
             setFrontmatter(graph, node.id, { status: "running" });
-            const result = runNodeHeadless(contextMd, agentDef, route);
+            // Faz 9.2: rate limit/kullanım limiti görülürse config'teki ayarla bekleyip
+            // tekrar dener; hâlâ engelleniyorsa düğümü `failed` SAYMAZ (geçici bir kesinti,
+            // task'ın hatası değil) — `running` kalır, döngü durur; bir sonraki oturum
+            // `gp resume`/`gp recover` (9.1) ile güvenle devam eder.
+            const result = runNodeHeadlessWithRetry(contextMd, agentDef, route, {
+                enabled: config.mode_b.rate_limit_retry.enabled,
+                waitSeconds: config.mode_b.rate_limit_retry.wait_seconds,
+                maxRetries: config.mode_b.rate_limit_retry.max_retries,
+            });
             if (result.ok) {
                 setFrontmatter(loadGraph(opts), node.id, { status: "done" });
+                results.push({ id: node.id, ok: true });
+            }
+            else if (result.rateLimited) {
+                results.push({ id: node.id, ok: false, rateLimited: true });
+                stoppedByRateLimit = true;
+                break;
             }
             else {
                 failNode(loadGraph(opts), node.id, "Mod B: claude -p başarısız (ilk sürüm, retry yok)");
+                results.push({ id: node.id, ok: false });
             }
-            results.push({ id: node.id, ok: result.ok });
         }
-        output(opts, { processed: results }, () => results.length === 0
-            ? "(işlenecek düğüm yok)"
-            : results.map((r) => `${r.ok ? "✓" : "✗"} ${r.id}`).join("\n"));
+        output(opts, { processed: results, stoppedByRateLimit }, () => [
+            results.length === 0
+                ? "(işlenecek düğüm yok)"
+                : results
+                    .map((r) => `${r.ok ? "✓" : r.rateLimited ? "⏸" : "✗"} ${r.id}`)
+                    .join("\n"),
+            stoppedByRateLimit
+                ? `\n⏸ Kullanım limiti nedeniyle durduruldu. ${results.at(-1).id} düğümünden devam edilecek (gp resume / gp recover).`
+                : "",
+        ]
+            .filter(Boolean)
+            .join("\n"));
     }));
     program
         .command("agent-stats")
@@ -616,7 +761,32 @@ export function buildCli() {
                 ts: new Date().toISOString(),
             });
         }
-        process.stdout.write(JSON.stringify(result.output));
+        // Faz 9.7 — "touches dışındaki dosyalara yazma tespiti → uyarı". `tool_input`'in
+        // Edit tool'daki tam alan adı bu oturumda DOĞRULANMADI (araştırma Write'ı
+        // doğruladı, Edit'i varsaymadı) — bu yüzden iki olası ad da denenir, hiçbiri
+        // yoksa sessizce atlanır (tahmin edip yanlış davranmaktan iyidir).
+        let output = result.output;
+        if (input.tool_name === "Write" || input.tool_name === "Edit") {
+            const target = input.tool_input?.file_path ?? input.tool_input?.filePath;
+            if (typeof target === "string") {
+                const relTarget = isAbsolute(target) ? relative(cwd, target) : target;
+                const running = readRunningNodesTouches(join(cwd, ".graph"));
+                const violation = checkTouchesViolation(relTarget, running);
+                // Faz 7'nin optimizations.* bayraklarından KASITLI OLARAK bağımsız — bu bir
+                // token-tasarruf tekniği değil, bir güvenlik uyarısı (9.7); kapatma anahtarı yok.
+                if (violation) {
+                    const prior = output.hookSpecificOutput?.additionalContext;
+                    const warning = `⚠ GraphPilot: "${violation.path}" şu an çalışan düğümün/düğümlerin 'touches' deseninin DIŞINDA (${violation.checkedAgainst.map((n) => n.nodeId).join(", ")}) — kapsam dışına mı çıktın?`;
+                    output = {
+                        hookSpecificOutput: {
+                            hookEventName: "PreToolUse",
+                            additionalContext: prior ? `${prior}\n${warning}` : warning,
+                        },
+                    };
+                }
+            }
+        }
+        process.stdout.write(JSON.stringify(output));
     }));
     return program;
 }
