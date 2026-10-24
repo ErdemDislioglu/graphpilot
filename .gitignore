@@ -6,6 +6,13 @@ coverage/
 .graph/_runtime/
 bench/results/raw/
 
+# Bu plugin'in kendi geliştirme süreci — bir kullanıcının plugin'i kurup kullanması
+# için gerekli değil, sadece devam eden geliştirme oturumları içindir (yerelde kalır,
+# repoya gitmez). docs/examples/**/.graph/ bu kuraldan MUAFTIR (kök ankrajlı, /.graph/).
+/.graph/
+/roadmap/
+/docs/research.md
+
 # plugin/lib/ ve plugin/package.json İZLENİR (ADR-009) — scripts/sync-cli-to-plugin.sh
 # tarafından üretilir, Faz 10'a kadar git'te tutulan geçici bir build artifact'ı.
 # plugin/node_modules/ zaten node_modules/ ile kapsanıyor; sadece kilit dosyasını

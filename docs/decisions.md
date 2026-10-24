@@ -2,7 +2,7 @@
 
 Her karar: bağlam → karar → gerekçe → sonuçlar. Kararlar numaralandırılır, geri alınmaz;
 değişirse yeni ADR yazılır ve eskisi "Değiştirildi (ADR-XXX)" diye işaretlenir.
-Dayanak bulgular: [research.md](research.md).
+Dayanak bulgular: `research.md` (iç geliştirme notları — bu repoda yayınlanmıyor).
 
 ---
 

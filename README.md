@@ -53,11 +53,11 @@ index, repeating until the graph is done.
 
 ## Status
 
-GraphPilot is implemented through **Phase 7 of an 11-phase roadmap** (see
-[`roadmap/00-ROADMAP.md`](roadmap/00-ROADMAP.md)): graph schema, a fully tested `gp` CLI,
-the plugin scaffold, intake/planning, lazy expansion, the execution engine (write → check
-→ fix → commit, with escalation on failure), and a layer of independently-toggleable
-token-optimization techniques. 266 tests pass; the CLI type-checks and lints clean.
+GraphPilot is implemented through **Phase 7 of an 11-phase roadmap**: graph schema, a
+fully tested `gp` CLI, the plugin scaffold, intake/planning, lazy expansion, the
+execution engine (write → check → fix → commit, with escalation on failure), and a
+layer of independently-toggleable token-optimization techniques. 266 tests pass; the
+CLI type-checks and lints clean.
 
 This project is built with an unusual amount of rigor about **what has actually been
 verified versus assumed**: every architectural decision is logged in
@@ -90,9 +90,8 @@ Then, in your project:
 ```
 cli/      TypeScript source for the `gp` CLI (parse, validate, route, context, checks, hooks, ...)
 plugin/   The installable Claude Code plugin (agents, skills, hooks)
-docs/     Spec (SPEC.md), architecture decisions (decisions.md), research notes
+docs/     Spec (SPEC.md) and architecture decisions (decisions.md)
 bench/    Benchmark scenarios and results (incl. the ablation table for Faz 7)
-roadmap/  The 11-phase roadmap, one file per phase, with a per-task changelog
 ```
 
 ## Development

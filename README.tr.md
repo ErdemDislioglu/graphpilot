@@ -54,12 +54,11 @@ commit'le → indeksi güncelle — graph bitene kadar tekrarla.
 
 ## Durum
 
-GraphPilot, **11 fazlık yol haritasının 7. fazına kadar** uygulandı (bkz.
-[`roadmap/00-ROADMAP.md`](roadmap/00-ROADMAP.md)): graph şeması, tamamen test edilmiş
-bir `gp` CLI'ı, plugin iskeleti, intake/planlama, tembel genişletme, yürütme motoru
-(yaz → kontrol et → düzelt → commit, başarısızlıkta yükseltme ile) ve ayrı ayrı
-açılıp kapatılabilir bir token-optimizasyon katmanı. 266 test geçiyor; CLI tip
-kontrolünden ve lint'ten temiz çıkıyor.
+GraphPilot, **11 fazlık yol haritasının 7. fazına kadar** uygulandı: graph şeması,
+tamamen test edilmiş bir `gp` CLI'ı, plugin iskeleti, intake/planlama, tembel
+genişletme, yürütme motoru (yaz → kontrol et → düzelt → commit, başarısızlıkta
+yükseltme ile) ve ayrı ayrı açılıp kapatılabilir bir token-optimizasyon katmanı.
+266 test geçiyor; CLI tip kontrolünden ve lint'ten temiz çıkıyor.
 
 Bu proje, **gerçekten doğrulanmış olanla varsayılanı** ayırmak konusunda alışılmadık
 bir titizlikle inşa edildi: her mimari karar [`docs/decisions.md`](docs/decisions.md)'de
@@ -92,9 +91,8 @@ Sonra, projenizin içinde:
 ```
 cli/      `gp` CLI'ının TypeScript kaynağı (parse, validate, route, context, checks, hooks, ...)
 plugin/   Kurulabilir Claude Code plugin'i (agent'lar, skill'ler, hook'lar)
-docs/     Spesifikasyon (SPEC.md), mimari kararlar (decisions.md), araştırma notları
+docs/     Spesifikasyon (SPEC.md) ve mimari kararlar (decisions.md)
 bench/    Benchmark senaryoları ve sonuçları (Faz 7'nin ablasyon tablosu dahil)
-roadmap/  11 fazlık yol haritası, faz başına bir dosya, görev başına bir günlük satırı
 ```
 
 ## Geliştirme
