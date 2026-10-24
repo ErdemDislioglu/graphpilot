@@ -473,6 +473,94 @@ ingest`'e ver.
   (maliyet hesabı) bu iki kaynağı uzlaştırmalı.
 - ⚠️ Yol, bu oturumda görülen Claude Code sürümüyle sınırlı, resmi API değil — değişebilir.
 
+## ADR-014 — Telegram `getUpdates`: TEK paylaşımlı poller, ayrı `gp resume` alt süreci yok
+
+**Tarih:** 2026-10-24 · **Durum:** Kabul edildi · **Faz:** 12.4/12.7/12.8
+
+### Bağlam
+Faz 12'nin üç ayrı parçası Telegram'dan güncelleme okumak istiyor: `Notifier.ask()`'ın
+buton cevabını beklemesi (12.4), `/status`/`/pause`/`/resume`/`/stop`/`/report` komutları
+(12.8) ve limit-sonrası bekleme döngüsünün komutlara duyarlı kalması (12.7). Telegram
+Bot API'nin `getUpdates`'i `offset` parametresiyle çalışıyor: bir `offset`'le çağırmak,
+ONDAN ÖNCEKİ TÜM güncellemeleri bot token'ı için KÜRESEL OLARAK onaylıyor (`core.telegram.org/
+bots/api`, 2026-10-24 doğrulandı) — iki BAĞIMSIZ `getUpdates` döngüsü aynı bot token'ıyla
+çalıştırılırsa, biri diğerinin henüz okumadığı güncellemeleri "onaylayıp" kaybettirebilir.
+
+Ayrıca roadmap 12.7'nin "süreç uyur; uyanınca `gp resume` ile yeni temiz oturumda kaldığı
+yerden devam eder" ifadesi, Mod A/9.1'in gerçek `gp resume` CLI komutunu (yeni bir
+SÜREÇ/oturum) çağırdığı izlenimi veriyordu.
+
+### Karar
+1. **Tek `TelegramPoller`** (`telegramPoller.ts`) — bot başına BİR `offset` durumu, BİR
+   `getUpdates` döngüsü. `ask()`'ın buton beklemesi `registerAsk(messageId)` ile bu
+   poller'a KAYIT OLUR (kendi `getUpdates` çağrısını YAPMAZ); komut dispatch'i
+   `onCommandMessage` ile AYNI poller'a kayıt olur. Ana otopilot döngüsü (`autopilotLoop.ts`)
+   `poller.pollOnce()`'u merkezi olarak çağırır — her ikisi de bunun sonucunu paylaşır.
+2. **Ayrı bir `gp resume` alt süreci ÇAĞRILMAZ.** "Limit sonrası devam", `autopilotLoop.ts`
+   içindeki `executeNodeWithLimitHandling`'in AYNI düğümü (hâlâ `running`) tekrar
+   denemesiyle sağlanır — graph dosyaları zaten tek doğruluk kaynağı olduğu için ayrı bir
+   "resume" adımına gerek yok. `gp resume`'un kendisi (Mod A/9.1) DEĞİŞMEDİ, sadece Mod B
+   otopilotu onu çağırmıyor.
+
+### Gerekçe
+(1) Telegram'ın kendi dokümantasyonunun açıkça belirttiği küresel-offset kısıtı —
+tahmin değil, doğrulanmış bir API davranışı. (2) Zaten dosya tabanlı durumu (graph,
+`events.jsonl`, `autopilot.json` kilidi) olan bir sistemde ayrı bir alt süreç başlatmak
+sıfır ek fayda, fazladan karmaşıklık (süreç yönetimi, IPC) getirirdi — "süreç öldürme →
+yeniden başlatma → kaldığı yerden devam" senaryosu (12.11) zaten YENİ bir `runAutopilotLoop`
+çağrısının AYNI dizine karşı çalışmasıyla doğal olarak çözülüyor (`autopilotLoop.test.ts`).
+
+### Sonuçlar
+- ✅ Gelecekte Slack/Discord gibi ikinci bir kanal eklenirse, o kanalın da KENDİ tek
+  poller'ı olmalı — ASLA aynı bot/token için iki bağımsız `getUpdates` döngüsü açılmamalı.
+- ✅ `autopilotLoop.ts`'in dışında `gp resume`'u elle çağırmaya gerek yok; süreç
+  kendiliğinden (aynı süreç içinde, uzun bekleme sırasında) ya da yeniden başlatıldığında
+  (12.10, yeni bir `gp autopilot start`) kaldığı yerden devam ediyor.
+- ⚠️ Bu, `TelegramPoller`'ın `pollOnce()`'unun DÜZENLİ çağrılmasına bağımlı — çağrılmazsa
+  (ör. ana döngü çok uzun bloklayan bir senkron işte sıkışırsa) Telegram güncellemeleri
+  birikir ama KAYBOLMAZ (offset ilerletilmediği sürece Telegram'ın kendi backlog'unda kalır).
+
+## ADR-015 — Epic-başına karar günlüğü: bare "decisions" slug'ı DEĞİL, epic-önekli
+
+**Tarih:** 2026-10-24 · **Durum:** Kabul edildi · **Faz:** 13.11
+
+### Bağlam
+Roadmap 13.11 "Her karar... ilgili bilgi düğümünün `## Kararlar` bölümüne" yazılmasını
+istiyor; SPEC.md'nin örnek klasör ağacı da her epic'in kendi `knowledge/decisions.md`'sini
+gösteriyor (`E01-<slug>/knowledge/decisions.md`). Ama knowledge node ID'leri (`id = name =
+slug`) `graph/parser.ts`'in `nodesByName` haritasında GRAPH GENELİNDE benzersiz olmak
+zorunda ("tekrarlanan name" hatası global, epic-scoped değil). İki epic'in HER İKİSİ bir
+"decisions" adlı knowledge node'u olamaz.
+
+### Karar
+Epic-başına karar günlüğü `${epicId.toLowerCase()}-decisions` slug'ıyla açılır (ör.
+"e01-decisions"), bare "decisions" DEĞİL. `decisionLog.ts`'in `recordDecision`'ı bu
+node'u YOKSA oluşturur (ilk kararda), varsa (gerçek dosya sistemi kontrolü — `graph`
+nesnesinin in-memory index'i değil, bkz. aşağıdaki ikinci karar) ekler.
+
+**İkinci, ilişkili karar:** `graph.nodesById`/`nodesByName` tek bir `recordDecision` dizisi
+için STALE olabilir (bir önceki çağrı diske yazdı ama `graph` nesnesi yeniden parse
+edilmedi). Bu yüzden "bu knowledge node zaten var mı" kontrolü in-memory index yerine
+GERÇEK DOSYA SİSTEMİ (`existsSync`) üzerinden yapılır — aksi halde aynı `graph` nesnesiyle
+art arda iki `recordDecision` çağrısı, ikinci seferde dosyayı SIFIRDAN ŞABLONLA EZER
+(ilk kararı siler).
+
+### Gerekçe
+SPEC'in niyeti (epic-başına ayrı bir karar günlüğü) korunuyor, sadece global ID
+benzersizliğiyle çakışmayacak şekilde. Dosya-sistemi kontrolü, bu projenin "saf fonksiyon,
+`graph` nesnesi değişmez" konvansiyonunun (`fail.ts`, `escalate.ts` vb. hep YENİ bir
+`loadFresh`/`parseGraph` çağrısıyla çalışır) `recordDecision`'ın KENDİSİ içinde birden
+fazla çağrı arasında da güvenli kalmasını sağlıyor.
+
+### Sonuçlar
+- ✅ Çok-epic'li gerçek projelerde `gp validate`/`parseGraph` ID çakışması YAŞAMAZ
+  (`decisionLog.test.ts`'in "farklı epic'ler" testi bunu gerçek bir `parseGraph` ile
+  doğruluyor).
+- ⚠️ SPEC.md'nin örnek klasör ağacındaki bare "decisions.md" ismi artık TEK-epic'li
+  örnekler için doğru, çok-epic'li gerçek kullanımda `<epic>-decisions.md` olacak — SPEC.md
+  bu ADR'a bağlanarak güncellenebilir (bu oturumda SPEC.md'nin kendisi DEĞİŞTİRİLMEDİ,
+  sadece bu ADR not düşüldü).
+
 ---
 
 ## Bekleyen kararlar

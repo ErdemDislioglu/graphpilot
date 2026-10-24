@@ -30,6 +30,7 @@ export declare const StatusSchema: z.ZodEnum<{
     failed: "failed";
     blocked: "blocked";
     skipped: "skipped";
+    needs_decision: "needs_decision";
 }>;
 export type Status = z.infer<typeof StatusSchema>;
 export declare const ComplexitySchema: z.ZodEnum<{
@@ -64,12 +65,26 @@ export declare const ModelSchema: z.ZodEnum<{
     opus: "opus";
     fable: "fable";
 }>;
-/** `checker` dahili (fix-loop tarafından çağrılır), frontmatter'dan seçilemez. */
+/** `checker` dahili (fix-loop tarafından çağrılır), frontmatter'dan seçilemez.
+ * Faz 13 eklemesi: `senior` — ekip modunda "Junior" rolü zaten `coder` (Faz 0 bulgusu:
+ * agent varyantı gerekmiyor, model çağrı anında değişir), ama "Senior" GERÇEKTEN farklı
+ * bir sistem promptu/yetkiye sahip (bkz. `plugin/agents/senior.md`) — bu yüzden kendi
+ * agent değeri var. */
 export declare const AgentSchema: z.ZodEnum<{
     docs: "docs";
     auto: "auto";
     coder: "coder";
     tester: "tester";
+    senior: "senior";
+}>;
+/** Faz 13.3 — görev düğümüne elle atama override'ı. `auto`: 13.3'ün tag tablosundan
+ * deterministik olarak çözülür (`team/assign.ts`). Diğerleri tabloyu ELLE ezer. */
+export declare const AssigneeSchema: z.ZodEnum<{
+    docs: "docs";
+    auto: "auto";
+    tester: "tester";
+    senior: "senior";
+    junior: "junior";
 }>;
 /** İndeks satırı için tek satır özet — SPEC §3. */
 export declare const SummarySchema: z.ZodString;

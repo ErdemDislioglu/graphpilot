@@ -114,3 +114,127 @@ describe("applyFlagFixes", () => {
     );
   });
 });
+
+describe("computeFlagFixes — Faz 13.4 tag kalitesi kuralları", () => {
+  it("touches içinde 'auth' geçen yol → tags:['security'] + complexity:med önerir", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(
+          TASK({
+            id: "E01-F01-T01",
+            name: "a",
+            touches: ["src/auth/login.ts"],
+            complexity: "low",
+            tags: [],
+          }),
+        ),
+      },
+      (graph) => {
+        const fixes = computeFlagFixes(graph);
+        expect(fixes).toEqual([
+          { nodeId: "E01-F01-T01", field: "tags", from: [], to: ["security"] },
+          { nodeId: "E01-F01-T01", field: "complexity", from: "low", to: "med" },
+        ]);
+      },
+    );
+  });
+
+  it("touches içinde 'migration' geçen yol → tags:['data_model'] önerir", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(
+          TASK({ id: "E01-F01-T01", name: "a", touches: ["db/migrations/001.sql"], tags: [] }),
+        ),
+      },
+      (graph) => {
+        const fixes = computeFlagFixes(graph);
+        expect(fixes[0]).toEqual({
+          nodeId: "E01-F01-T01",
+          field: "tags",
+          from: [],
+          to: ["data_model"],
+        });
+      },
+    );
+  });
+
+  it("zaten doğru tag varsa tekrar önerilmez (idempotent)", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(
+          TASK({
+            id: "E01-F01-T01",
+            name: "a",
+            touches: ["src/auth/login.ts"],
+            complexity: "med",
+            tags: ["security"],
+          }),
+        ),
+      },
+      (graph) => {
+        expect(computeFlagFixes(graph)).toEqual([]);
+      },
+    );
+  });
+
+  it("başka epic'teki bir görev buna bağımlıysa → tags:['architecture'] önerir", () => {
+    withTempGraph(
+      {
+        "E01-x/epic.md": frontmatter({
+          id: "E01",
+          kind: "epic",
+          name: "E01-x",
+          summary: "s",
+          status: "pending",
+          expanded: true,
+        }),
+        "E01-x/tasks/F01-T01-a.md": frontmatter(
+          TASK({ id: "E01-F01-T01", name: "F01-T01-a", tags: [] }),
+        ),
+        "E02-y/epic.md": frontmatter({
+          id: "E02",
+          kind: "epic",
+          name: "E02-y",
+          summary: "s",
+          status: "pending",
+          expanded: true,
+        }),
+        "E02-y/tasks/F01-T01-b.md": frontmatter(
+          TASK({ id: "E02-F01-T01", name: "F01-T01-b", depends_on: ["E01-F01-T01"], tags: [] }),
+        ),
+      },
+      (graph) => {
+        const fixes = computeFlagFixes(graph);
+        expect(fixes).toContainEqual({
+          nodeId: "E01-F01-T01",
+          field: "tags",
+          from: [],
+          to: ["architecture"],
+        });
+        // Bağımlı olan (E02-F01-T01) kendisi cross-epic hedefi DEĞİL, kaynağı — ona
+        // architecture tag'i önerilmez.
+        expect(fixes.find((f) => f.nodeId === "E02-F01-T01")).toBeUndefined();
+      },
+    );
+  });
+});
+
+describe("applyFlagFixes — Faz 13.4 (tags dizi alanı)", () => {
+  it("tags fix'ini gerçekten diske yazar (gp set'in string-koersiyonu BYPASS edilir)", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(
+          TASK({ id: "E01-F01-T01", name: "a", touches: ["src/auth/x.ts"], tags: [] }),
+        ),
+      },
+      (graph, dir) => {
+        const fixes = computeFlagFixes(graph);
+        applyFlagFixes(graph, fixes);
+        const after = matter(readFileSync(`${dir}/a.md`, "utf-8"));
+        expect(after.data.tags).toEqual(["security"]);
+        expect(after.data.complexity).toBe("med");
+        expect(computeFlagFixes(parseGraph(dir))).toEqual([]); // idempotent
+      },
+    );
+  });
+});

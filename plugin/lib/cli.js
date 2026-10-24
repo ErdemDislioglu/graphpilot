@@ -37,10 +37,27 @@ import { computeAllKnowledgeSyncReports, defaultFileHashReader, setKnowledgeSour
 import { readAgentDefinition } from "./agentFile.js";
 import { runNodeHeadlessWithRetry } from "./runModeB.js";
 import { writeFileAtomic } from "./atomicWrite.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, openSync } from "node:fs";
 import { ConfigSchema } from "./schema/index.js";
 import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { runAutopilotLoop } from "./autopilot/autopilotLoop.js";
+import { loadSecrets, writeSecretsFile } from "./autopilot/secrets.js";
+import { checkLock, removeLock, writeLock } from "./autopilot/processLock.js";
+import { TelegramClient } from "./autopilot/telegramClient.js";
+import { TelegramPoller } from "./autopilot/telegramPoller.js";
+import { TelegramNotifier } from "./autopilot/telegramNotifier.js";
+import { resolveAssignment } from "./team/assign.js";
+import { escalateTeamNode } from "./team/teamEscalate.js";
+import { findDecision, markDecisionOverridden, readDecisions, recordDecision } from "./team/decisionLog.js";
+import { computeMisTagRatio, summarizeMisTags } from "./team/tagging.js";
+import { parseFinding } from "./team/finding.js";
+import { computeFindingImpact, FINDING_KIND_TO_SITUATION } from "./team/findingHandler.js";
+import { decideManagerAction } from "./team/managerPolicy.js";
+import { decisionNeededMessage, formatImpactText } from "./autopilot/messages.js";
+import { emitEvent } from "./autopilot/eventBus.js";
+import { appendErrorHistoryLine } from "./errorHistory.js";
 function loadGraph(opts) {
     return parseGraph(opts.graphRoot);
 }
@@ -62,6 +79,19 @@ function action(fn) {
     return (...args) => {
         try {
             fn(...args);
+        }
+        catch (err) {
+            console.error(`hata: ${err instanceof Error ? err.message : String(err)}`);
+            process.exitCode = 1;
+        }
+    };
+}
+/** `action()`'ın async sürümü — Faz 12 otopilot komutları (Telegram ağ çağrıları,
+ * süreç yönetimi) için. `bin.ts`/`cli.test.ts` zaten `parseAsync` kullanıyor. */
+function asyncAction(fn) {
+    return async (...args) => {
+        try {
+            await fn(...args);
         }
         catch (err) {
             console.error(`hata: ${err instanceof Error ? err.message : String(err)}`);
@@ -674,6 +704,329 @@ export function buildCli() {
         ]
             .filter(Boolean)
             .join("\n"));
+    }));
+    const autopilotCmd = program
+        .command("autopilot")
+        .description("Roadmap Faz 12 — insansız yürütme, Telegram bildirim/onay");
+    withGraphRoot(autopilotCmd
+        .command("setup")
+        .description("Telegram botunu bağlar: token'ı doğrular, bota gönderilecek /start'ı bekler, " +
+        "chat ID'yi ~/.graphpilot/secrets.json'a kaydeder, test mesajı yollar"))
+        .requiredOption("--token <token>", "Telegram bot token'ı (@BotFather'dan alınır)")
+        .option("--wait-seconds <n>", "'/start' için en fazla kaç saniye beklenir", (v) => Number(v), 30)
+        .action(asyncAction(async (opts) => {
+        const client = new TelegramClient(opts.token);
+        const me = await client.getMe();
+        console.log(`✓ Bot doğrulandı: @${me.username ?? me.first_name}`);
+        console.log("Telegram'da botuna /start gönder (bekleniyor)...");
+        const deadlineMs = Date.now() + opts.waitSeconds * 1000;
+        let chatId = null;
+        while (Date.now() < deadlineMs && chatId === null) {
+            const updates = await client.getUpdates(0, 3);
+            const started = updates.find((u) => u.message?.text === "/start");
+            if (started?.message)
+                chatId = started.message.chat.id;
+        }
+        if (chatId === null) {
+            throw new Error(`${opts.waitSeconds}s içinde /start gelmedi — Telegram'da botu bulup tekrar dene`);
+        }
+        writeSecretsFile({ telegramBotToken: opts.token, telegramChatId: String(chatId) });
+        await client.sendMessage(chatId, "✅ GraphPilot otopilot bağlandı.");
+        console.log(`✓ chat ID kaydedildi (${chatId}), test mesajı gönderildi.`);
+    }));
+    withGraphRoot(autopilotCmd
+        .command("start")
+        .description("Otopilotu arka planda başlatır (detached süreç). launchd/systemd/Windows " +
+        "görev zamanlayıcıyla kalıcı 7/24 kurulum roadmap 12.10'un elle adımıdır, bu komut değil."))
+        .requiredOption("--agents-dir <path>", "agent tanım dosyalarının (coder.md vb.) bulunduğu dizin")
+        .action(asyncAction(async (opts) => {
+        const graph = loadGraph(opts);
+        const config = loadConfig(graph);
+        if (!config.autopilot.enabled) {
+            throw new Error("autopilot.enabled: false (config.yml) — başlatmadan önce true yap");
+        }
+        const lock = checkLock(opts.graphRoot);
+        if (lock.locked)
+            throw new Error(`otopilot zaten çalışıyor (PID ${lock.info.pid})`);
+        if (!loadSecrets()) {
+            throw new Error("Telegram bağlı değil — önce 'gp autopilot setup --token <TOKEN>' çalıştır");
+        }
+        const runtimeDir = join(opts.graphRoot, "_runtime");
+        mkdirSync(runtimeDir, { recursive: true });
+        const logPath = join(runtimeDir, "autopilot.log");
+        const logFd = openSync(logPath, "a");
+        const binPath = fileURLToPath(new URL("./bin.js", import.meta.url));
+        const child = spawn(process.execPath, [
+            binPath,
+            "autopilot",
+            "run-loop-internal",
+            "-g",
+            resolvePath(opts.graphRoot),
+            "--agents-dir",
+            resolvePath(opts.agentsDir),
+        ], { detached: true, stdio: ["ignore", logFd, logFd] });
+        child.unref();
+        if (!child.pid)
+            throw new Error("alt süreç başlatılamadı (pid yok)");
+        writeLock(opts.graphRoot, child.pid);
+        console.log(`✓ otopilot başlatıldı (PID ${child.pid}). Loglar: ${logPath}`);
+    }));
+    withGraphRoot(autopilotCmd.command("stop").description("Çalışan otopilotu güvenli şekilde durdurur (SIGTERM)")).action(action((opts) => {
+        const lock = checkLock(opts.graphRoot);
+        if (!lock.locked) {
+            if (lock.stale)
+                removeLock(opts.graphRoot);
+            output(opts, { stopped: false }, () => "otopilot çalışmıyor.");
+            return;
+        }
+        process.kill(lock.info.pid, "SIGTERM");
+        removeLock(opts.graphRoot);
+        output(opts, { stopped: true, pid: lock.info.pid }, () => `✓ durduruldu (PID ${lock.info.pid}).`);
+    }));
+    withGraphRoot(autopilotCmd.command("status").description("Otopilot süreci çalışıyor mu?")).action(action((opts) => {
+        const lock = checkLock(opts.graphRoot);
+        if (lock.stale)
+            removeLock(opts.graphRoot);
+        output(opts, { running: lock.locked, info: lock.info }, () => lock.locked
+            ? `● çalışıyor (PID ${lock.info.pid}, başladı: ${lock.info.startedAt})`
+            : "○ çalışmıyor");
+    }));
+    withGraphRoot(autopilotCmd.command("logs").description("Otopilot log dosyasının son satırları"))
+        .option("-n, --lines <n>", "son N satır", (v) => Number(v), 50)
+        .action(action((opts) => {
+        const logPath = join(opts.graphRoot, "_runtime", "autopilot.log");
+        if (!existsSync(logPath)) {
+            output(opts, { lines: [] }, () => "(henüz log yok — otopilot hiç başlatılmamış)");
+            return;
+        }
+        const allLines = readFileSync(logPath, "utf-8").split("\n").filter((l) => l.length > 0);
+        const tail = allLines.slice(-opts.lines);
+        output(opts, { lines: tail }, () => (tail.length > 0 ? tail.join("\n") : "(boş)"));
+    }));
+    withGraphRoot(autopilotCmd.command("run-loop-internal", { hidden: true }).description("DAHİLİ — 'gp autopilot start' tarafından alt süreç olarak çağrılır; elle çalıştırmayın"))
+        .requiredOption("--agents-dir <path>", "agent tanım dosyalarının bulunduğu dizin")
+        .action(asyncAction(async (opts) => {
+        try {
+            const graph = loadGraph(opts);
+            const config = loadConfig(graph);
+            const secrets = loadSecrets();
+            if (!secrets)
+                throw new Error("Telegram secrets bulunamadı (~/.graphpilot/secrets.json)");
+            const client = new TelegramClient(secrets.telegramBotToken);
+            const poller = new TelegramPoller(client, secrets.telegramChatId);
+            const notifier = new TelegramNotifier(client, secrets.telegramChatId, poller);
+            const result = await runAutopilotLoop({
+                graphRootDir: opts.graphRoot,
+                agentsDir: opts.agentsDir,
+                notifier,
+                poller,
+                lang: config.autopilot.language,
+            });
+            output(opts, result, () => `bitti: ${result.stopReason} (işlenen: ${result.processedCount})`);
+        }
+        finally {
+            removeLock(opts.graphRoot);
+        }
+    }));
+    const teamCmd = program
+        .command("team")
+        .description("Roadmap Faz 13 — ekip modu: tag'e dayalı atama, escalation, karar günlüğü");
+    withGraphRoot(teamCmd.command("assign").description("Bir görevin ekip atamasını gösterir (deterministik, 13.3)"))
+        .argument("<id>", "task ID'si")
+        .action(action((id, opts) => {
+        const graph = loadGraph(opts);
+        const config = loadConfig(graph);
+        const node = graph.nodesById.get(id);
+        if (!node)
+            throw new Error(`düğüm bulunamadı: ${id}`);
+        const assignment = resolveAssignment(node, config);
+        output(opts, assignment, () => `${assignment.role} · model: ${assignment.model} · agent: ${assignment.agent}`);
+    }));
+    withGraphRoot(teamCmd
+        .command("escalate")
+        .description("Bir görevi ekip zincirinde yükseltir (junior(haiku)→junior(sonnet)→senior, 13.5)"))
+        .argument("<id>", "task ID'si")
+        .action(action((id, opts) => {
+        const graph = loadGraph(opts);
+        const config = loadConfig(graph);
+        const result = escalateTeamNode(graph, id, config);
+        output(opts, result, () => result.escalated
+            ? `${result.fromRole}(${result.fromModel}) → ${result.toRole}(${result.toModel})`
+            : `yükseltilmedi: ${result.reason}`);
+    }));
+    const decisionsCmd = teamCmd.command("decisions").description("Roadmap 13.11 — karar günlüğü");
+    withGraphRoot(decisionsCmd.command("list").description("Tüm kayıtlı kararları listeler")).action(action((opts) => {
+        const decisions = readDecisions(opts.graphRoot);
+        output(opts, decisions, () => decisions.length === 0
+            ? "(henüz karar yok)"
+            : decisions
+                .map((d) => `${d.overridden ? "✗" : "✓"} ${d.id} · ${d.nodeId} · ${d.summary} · ${d.decidedBy}`)
+                .join("\n"));
+    }));
+    withGraphRoot(decisionsCmd
+        .command("override")
+        .description("Bir kararı geri çevirir, aynı feature'a bir düzeltme görevi açar (13.11)"))
+        .argument("<decision-id>", "ör. E01-F01-T03-D1")
+        .action(action((decisionId, opts) => {
+        const graph = loadGraph(opts);
+        const decision = findDecision(opts.graphRoot, decisionId);
+        if (!decision)
+            throw new Error(`karar bulunamadı: ${decisionId}`);
+        markDecisionOverridden(opts.graphRoot, decisionId);
+        const featureId = decision.nodeId.split("-").slice(0, 2).join("-");
+        const slug = `override-${decisionId}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+        const result = createNewNode(graph, {
+            kind: "task",
+            slug,
+            parent: featureId,
+            summary: `Karar geri çevrildi (${decisionId}): düzeltme gerekiyor`.slice(0, 100),
+        });
+        output(opts, { decisionId, overridden: true, correctionTask: result.id }, () => `✓ ${decisionId} geri çevrildi. Düzeltme görevi: ${result.id}`);
+    }));
+    withGraphRoot(teamCmd.command("stats").description("Roadmap 13.13 — ekip ölçümleri (yanlış tag oranı, karar/geri çevirme sayısı)")).action(action((opts) => {
+        const graph = loadGraph(opts);
+        const status = computeStatusSummary(graph);
+        const doneCount = status.byStatus.done ?? 0;
+        const misTags = summarizeMisTags(opts.graphRoot);
+        const misTagRatio = computeMisTagRatio(opts.graphRoot, doneCount);
+        const decisions = readDecisions(opts.graphRoot);
+        const overriddenCount = decisions.filter((d) => d.overridden).length;
+        const stats = {
+            doneTasks: doneCount,
+            misTags,
+            misTagRatio,
+            decisionsTotal: decisions.length,
+            overriddenCount,
+            overrideRatio: decisions.length > 0 ? overriddenCount / decisions.length : 0,
+        };
+        output(opts, stats, () => [
+            `bitmiş görev: ${doneCount}`,
+            `yanlış tag: ${misTags.total} (${(misTagRatio * 100).toFixed(1)}%) — eksik tahmin: ${misTags.underestimated}, fazla tahmin: ${misTags.overestimated}`,
+            `karar: ${decisions.length}, geri çevrilen: ${overriddenCount} (${(stats.overrideRatio * 100).toFixed(1)}%)`,
+        ].join("\n"));
+    }));
+    /**
+     * Roadmap 13.7/13.9 — `gp team finding`/`finding-answer` ikilisi `findingHandler.ts`'in
+     * `handleFinding`/`askUserAndResolve`'una BİREBİR AYNI MANTIĞI uygular ama `Notifier`
+     * (Telegram/otopilot, Faz 12) üzerinden DEĞİL — Mod A'nın ANA THREAD'i zaten
+     * `AskUserQuestion`'a sahip (subagent'lar sahip değil), bu yüzden "soru sor" adımı
+     * BURADA değil, SKILL'in (`/gp:team`) kendisinde. Bu komut sadece "soru metnini/
+     * seçeneklerini üret" ve "gerekirse HİÇ SORMADAN kendisi çöz" kısımlarını yapar;
+     * `finding-answer` cevabı UYGULAR. Bilinçli kod tekrarı (iki ayrı yürütme modeli,
+     * zorla ortak bir soyutlamaya sıkıştırmak yerine).
+     */
+    withGraphRoot(teamCmd
+        .command("finding")
+        .description("Roadmap 13.7 — bir bulguyu bildirir. Bloklamıyorsa ya da yönetici kendisi " +
+        "çözebiliyorsa HEMEN sonuçlanır; aksi halde soru metnini döner (Mod A: " +
+        "AskUserQuestion ile sor, sonra 'gp team finding-answer' ile uygula)"))
+        .argument("<id>", "task ID'si")
+        .requiredOption("--finding <json>", "Finding JSON'u (kind/severity/summary/options/recommended)")
+        .action(action((id, opts) => {
+        const graph = loadGraph(opts);
+        const config = loadConfig(graph);
+        const node = graph.nodesById.get(id);
+        if (!node)
+            throw new Error(`düğüm bulunamadı: ${id}`);
+        const finding = parseFinding(JSON.parse(opts.finding));
+        const chosen = finding.options[finding.recommended];
+        if (finding.severity === "non_blocking") {
+            appendErrorHistoryLine(node.filePath, `${id} bulgu (bloklamayan, ${finding.kind}): ${finding.summary} → ${chosen}`);
+            if (node.epicId) {
+                recordDecision(graph, {
+                    epicId: node.epicId,
+                    nodeId: id,
+                    summary: `${finding.summary} → ${chosen}`,
+                    decidedBy: "manager",
+                    optionsCount: finding.options.length,
+                });
+            }
+            output(opts, { outcome: "proceeded_with_recommended", chosenOptionIndex: finding.recommended }, () => `✓ bloklamayan, önerilen uygulandı: ${chosen}`);
+            return;
+        }
+        setFrontmatter(graph, id, { status: "needs_decision" });
+        emitEvent(opts.graphRoot, { type: "needs_decision", nodeId: id, message: finding.summary, data: { finding } });
+        appendErrorHistoryLine(node.filePath, `${id} bulgu (BLOKLAYAN, ${finding.kind}): ${finding.summary}`);
+        const situation = FINDING_KIND_TO_SITUATION[finding.kind];
+        const managerAction = decideManagerAction(situation, config.team.manager.autonomy);
+        if (managerAction === "self") {
+            setFrontmatter(graph, id, { status: "pending" });
+            appendErrorHistoryLine(node.filePath, `${id} karar (yönetici): ${chosen}`);
+            if (node.epicId) {
+                recordDecision(graph, {
+                    epicId: node.epicId,
+                    nodeId: id,
+                    summary: `${finding.summary} → ${chosen}`,
+                    decidedBy: "manager",
+                    optionsCount: finding.options.length,
+                });
+            }
+            emitEvent(opts.graphRoot, { type: "decision_answered", nodeId: id, data: { decidedBy: "manager" } });
+            output(opts, { outcome: "self_resolved", chosenOptionIndex: finding.recommended }, () => `✓ yönetici kendisi çözdü: ${chosen}`);
+            return;
+        }
+        if (managerAction === "consult_senior") {
+            output(opts, { outcome: "needs_senior_consultation", situation }, () => `senior'a danışılmalı (${situation}) — cevabı aldıktan sonra 'gp team finding-answer' çağır`);
+            return;
+        }
+        const impact = computeFindingImpact(graph, id);
+        const msg = decisionNeededMessage(config.autopilot.language, {
+            nodeId: id,
+            nodeTitle: node.name,
+            situation: finding.summary,
+            impactText: formatImpactText(config.autopilot.language, impact),
+            recommendedOption: chosen,
+            options: finding.options,
+            recommendedIndex: finding.recommended,
+        });
+        output(opts, { outcome: "needs_user_decision", message: msg.text, options: finding.options }, () => `${msg.text}\n\n→ AskUserQuestion ile sor, cevabı 'gp team finding-answer ${id} --finding <json> --answer <index|stop>' ile uygula.`);
+    }));
+    withGraphRoot(teamCmd
+        .command("finding-answer")
+        .description("Roadmap 13.9 — AskUserQuestion'dan (ya da senior danışmasından) gelen cevabı uygular"))
+        .argument("<id>", "task ID'si")
+        .requiredOption("--finding <json>", "Aynı Finding JSON'u (seçenek metinlerini kaydetmek için)")
+        .requiredOption("--answer <value>", "seçilen seçeneğin indeksi (0,1,2,...) ya da 'stop'")
+        .option("--decided-by <who>", "karar veren", "user (ekran)")
+        .action(action((id, opts) => {
+        const graph = loadGraph(opts);
+        const node = graph.nodesById.get(id);
+        if (!node)
+            throw new Error(`düğüm bulunamadı: ${id}`);
+        const finding = parseFinding(JSON.parse(opts.finding));
+        if (opts.answer === "stop") {
+            setFrontmatter(graph, id, { status: "failed" });
+            appendErrorHistoryLine(node.filePath, `${id} karar (${opts.decidedBy}): durduruldu`);
+            if (node.epicId) {
+                recordDecision(graph, {
+                    epicId: node.epicId,
+                    nodeId: id,
+                    summary: `${finding.summary} → durduruldu`,
+                    decidedBy: opts.decidedBy,
+                    optionsCount: finding.options.length,
+                });
+            }
+            emitEvent(opts.graphRoot, { type: "decision_answered", nodeId: id, data: { decidedBy: opts.decidedBy, stopped: true } });
+            output(opts, { outcome: "stopped" }, () => "✓ durduruldu.");
+            return;
+        }
+        const idx = Number(opts.answer);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= finding.options.length) {
+            throw new Error(`geçersiz seçenek indeksi: ${opts.answer}`);
+        }
+        setFrontmatter(graph, id, { status: "pending" });
+        appendErrorHistoryLine(node.filePath, `${id} karar (${opts.decidedBy}): ${finding.options[idx]}`);
+        if (node.epicId) {
+            recordDecision(graph, {
+                epicId: node.epicId,
+                nodeId: id,
+                summary: `${finding.summary} → ${finding.options[idx]}`,
+                decidedBy: opts.decidedBy,
+                optionsCount: finding.options.length,
+            });
+        }
+        emitEvent(opts.graphRoot, { type: "decision_answered", nodeId: id, data: { decidedBy: opts.decidedBy } });
+        output(opts, { outcome: "user_chose", chosenOptionIndex: idx }, () => `✓ karar uygulandı: ${finding.options[idx]}`);
     }));
     program
         .command("agent-stats")

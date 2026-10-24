@@ -9,9 +9,11 @@ step in the background — with measurably less token spend than driving the sam
 by hand.
 
 ```
-/gp:plan   → brief + epics
-/gp:expand → lazily expand an epic into features/tasks, flag them
-/gp:run    → execute the graph: route → isolate context → write → verify → fix → commit
+/gp:plan     → brief + epics
+/gp:expand   → lazily expand an epic into features/tasks, flag them
+/gp:run      → execute the graph: route → isolate context → write → verify → fix → commit
+/gp:team     → same, but routed through a manager + junior/senior/tester/docs roles
+gp autopilot → run either loop unattended, with Telegram notifications and approvals
 ```
 
 ## Why
@@ -53,19 +55,33 @@ index, repeating until the graph is done.
 
 ## Status
 
-GraphPilot is implemented through **Phase 7 of an 11-phase roadmap**: graph schema, a
-fully tested `gp` CLI, the plugin scaffold, intake/planning, lazy expansion, the
-execution engine (write → check → fix → commit, with escalation on failure), and a
-layer of independently-toggleable token-optimization techniques. 266 tests pass; the
-CLI type-checks and lints clean.
+GraphPilot's core (graph schema, a fully tested `gp` CLI, the plugin scaffold,
+intake/planning, lazy expansion, the execution engine, independently-toggleable
+token-optimization techniques, and interrupt/resume resilience) is done, plus two
+later-roadmap features that were pulled ahead of packaging and release:
+
+- **Autopilot** — unattended headless execution with Telegram notifications,
+  button-based approvals, automatic resume after hitting a usage limit, and process
+  management (`gp autopilot start|stop|status|logs`).
+- **Team mode** (`/gp:team`) — a manager that routes tasks to junior/senior/tester/docs
+  roles by complexity and risk tags, escalates failures up the chain (junior → junior
+  on a stronger model → senior), and asks for approval — via Telegram or in-session —
+  on security, architecture, and scope decisions, with every decision logged and
+  revertible.
+
+578 tests pass; the CLI type-checks and lints clean, and every one of those tests runs
+against deterministic code — none of this work spent a real LLM API call. A live,
+end-to-end trial of autopilot/team mode against a real Telegram bot hasn't been run yet
+and is noted as such.
 
 This project is built with an unusual amount of rigor about **what has actually been
 verified versus assumed**: every architectural decision is logged in
 [`docs/decisions.md`](docs/decisions.md) as a dated ADR with its evidence, and every
 claim about Claude Code's own behavior that couldn't be confirmed in-session is marked
-`DOĞRULANMADI` (unverified) rather than asserted. Phases 8–11 (benchmarking against raw
-Claude Code, resilience/interrupt-recovery, packaging/release, and a cheap reviewer +
-API-test layer) are not started yet.
+`DOĞRULANMADI` (unverified) rather than asserted. Benchmarking against raw Claude Code
+is deliberately shelved — producing a real comparison needs paid API usage, which was
+judged not worth spending yet. Packaging/release and a cheap reviewer + API-test layer
+haven't been started.
 
 ## Install
 
@@ -83,6 +99,14 @@ Then, in your project:
 /gp:plan    # turns a product brief into brief.md + epics
 /gp:expand  # expands an epic into flagged features/tasks on demand
 /gp:run     # executes the graph end to end
+/gp:team    # same, through a manager + junior/senior/tester/docs roles (needs team.enabled: true)
+```
+
+To run unattended with Telegram notifications instead of staying in the session:
+
+```
+gp autopilot setup --token <your-bot-token>   # validates the bot, links your chat
+gp autopilot start --agents-dir plugin/agents # runs in the background; /pause /resume /stop from Telegram
 ```
 
 ## Repository layout
@@ -91,7 +115,7 @@ Then, in your project:
 cli/      TypeScript source for the `gp` CLI (parse, validate, route, context, checks, hooks, ...)
 plugin/   The installable Claude Code plugin (agents, skills, hooks)
 docs/     Spec (SPEC.md) and architecture decisions (decisions.md)
-bench/    Benchmark scenarios and results (incl. the ablation table for Faz 7)
+bench/    Benchmark scenarios and results (incl. the token-optimization ablation table)
 ```
 
 ## Development
@@ -100,7 +124,7 @@ bench/    Benchmark scenarios and results (incl. the ablation table for Faz 7)
 cd cli
 nvm use          # Node >=22 required
 npm install
-npm test          # Vitest — 266 tests
+npm test          # Vitest — 578 tests
 npm run lint
 npm run build      # emits dist/, synced into plugin/lib/ via scripts/sync-cli-to-plugin.sh
 ```

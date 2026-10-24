@@ -25,13 +25,13 @@ export declare function runNodeHeadless(contextMarkdown: string, agentDef: Agent
     max_turns: number;
 }, spawner?: ClaudeHeadlessSpawner): HeadlessRunResult;
 /**
- * Roadmap 9.2 — "kullanım limiti/rate limit hatasını tanı". ❗ **DOĞRULANMADI:** bu
- * oturumda gerçek bir 429/kullanım-limiti yanıtı hiç gözlenmedi (research.md Açık Soru
- * #5 — abonelik kota kuralları hâlâ belirsiz); bu yüzden savunmacı/en-iyi-çaba bir desen
- * eşleştirmesi — yaygın görülen birkaç anahtar kelimeyi arar. Eşleşme YOKSA normal
- * başarısızlık sayılır (yanlış pozitiften kaçınmak yanlış negatiften daha güvenli: bir
- * gerçek hatayı "rate limit" sanıp sonsuz beklemek, bir rate limit'i normal hata sanıp
- * düğümü yanlışlıkla `failed` işaretlemekten daha kötü sonuç verir).
+ * Roadmap 9.2 — "kullanım limiti/rate limit hatasını tanı". Faz 12.1'de (code.claude.com/
+ * docs/en/errors, 2026-10-24'te gerçekten WebFetch ile okundu) GERÇEK hata metinleri
+ * doğrulandı — artık tahmin değil: "You've hit your session limit", "...weekly limit",
+ * "...Opus limit", "...Sonnet limit", "Server is temporarily limiting requests" (429 tarzı).
+ * `claude -p --output-format json` çağrısında bu metnin TAM OLARAK HANGİ ALANDA
+ * (stdout/stderr, hangi JSON alanı) çıkacağı hâlâ DOĞRULANMADI — doküman bunu belirtmiyor;
+ * bu yüzden hem stdout hem stderr'e bakılıyor, savunmacı kalınıyor (Açık Soru #5, kısmen kapandı).
  */
 export declare function isRateLimitSignal(text: string): boolean;
 export interface RateLimitRetryOptions {

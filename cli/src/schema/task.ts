@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AgentSchema,
+  AssigneeSchema,
   ComplexitySchema,
   ContextSizeSchema,
   ModelSchema,
@@ -39,6 +40,12 @@ export const TaskFrontmatterSchema = z
     // somut mekanizması. draft:true ise bu düğümden çıkan depends_on/reads hedeflerinin
     // henüz var olmaması gp validate'te hata sayılmaz (gp validate.ts, "draft" kontrolü).
     draft: z.boolean().default(false),
+    // Faz 13.3 eklemesi — serbest etiketler (ör. ["auth", "security"]). Atama tablosu
+    // (`team/assign.ts`) bunları `architecture`/`security`/`data_model`/`integration`
+    // için okur; roadmap §13.4'ün deterministik düzeltme kuralları da bunu üretir.
+    tags: z.array(z.string().min(1)).default([]),
+    // Faz 13.3 eklemesi — `auto` ise tag tablosundan çözülür, değilse elle ezer.
+    assignee: AssigneeSchema.default("auto"),
   })
   .strict();
 

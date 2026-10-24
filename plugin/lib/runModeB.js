@@ -31,19 +31,21 @@ export function runNodeHeadless(contextMarkdown, agentDef, route, spawner = defa
     return { ok: status === 0, stdout, stderr: stderr ?? "", status };
 }
 /**
- * Roadmap 9.2 — "kullanım limiti/rate limit hatasını tanı". ❗ **DOĞRULANMADI:** bu
- * oturumda gerçek bir 429/kullanım-limiti yanıtı hiç gözlenmedi (research.md Açık Soru
- * #5 — abonelik kota kuralları hâlâ belirsiz); bu yüzden savunmacı/en-iyi-çaba bir desen
- * eşleştirmesi — yaygın görülen birkaç anahtar kelimeyi arar. Eşleşme YOKSA normal
- * başarısızlık sayılır (yanlış pozitiften kaçınmak yanlış negatiften daha güvenli: bir
- * gerçek hatayı "rate limit" sanıp sonsuz beklemek, bir rate limit'i normal hata sanıp
- * düğümü yanlışlıkla `failed` işaretlemekten daha kötü sonuç verir).
+ * Roadmap 9.2 — "kullanım limiti/rate limit hatasını tanı". Faz 12.1'de (code.claude.com/
+ * docs/en/errors, 2026-10-24'te gerçekten WebFetch ile okundu) GERÇEK hata metinleri
+ * doğrulandı — artık tahmin değil: "You've hit your session limit", "...weekly limit",
+ * "...Opus limit", "...Sonnet limit", "Server is temporarily limiting requests" (429 tarzı).
+ * `claude -p --output-format json` çağrısında bu metnin TAM OLARAK HANGİ ALANDA
+ * (stdout/stderr, hangi JSON alanı) çıkacağı hâlâ DOĞRULANMADI — doküman bunu belirtmiyor;
+ * bu yüzden hem stdout hem stderr'e bakılıyor, savunmacı kalınıyor (Açık Soru #5, kısmen kapandı).
  */
 export function isRateLimitSignal(text) {
     const lower = text.toLowerCase();
-    return (lower.includes("rate limit") ||
+    return ((lower.includes("hit your") && (lower.includes("limit") || lower.includes("budget"))) ||
+        lower.includes("rate limit") ||
         lower.includes("rate_limit") ||
         lower.includes("usage limit") ||
+        lower.includes("temporarily limiting requests") ||
         lower.includes("429") ||
         (lower.includes("quota") && lower.includes("exceeded")));
 }

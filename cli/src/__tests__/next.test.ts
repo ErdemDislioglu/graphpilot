@@ -107,3 +107,23 @@ describe("computeNext — döngü varsa cycles'ta raporlanır, ready'ye hiçbiri
     );
   });
 });
+
+describe("computeNext — roadmap 13.10 'cevapsız soru: bağımlı bekler, bağımsız devam eder'", () => {
+  it("needs_decision bir düğümün bağımlıları ready değil, bağımsız bir düğüm ready kalır", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(TASK({ id: "E01-F01-T01", name: "a", status: "needs_decision" })),
+        "b.md": frontmatter(
+          TASK({ id: "E01-F01-T02", name: "b", depends_on: ["E01-F01-T01"], status: "pending" }),
+        ),
+        "c.md": frontmatter(TASK({ id: "E01-F01-T03", name: "c", depends_on: [], status: "pending" })),
+      },
+      (graph) => {
+        const result = computeNext(graph);
+        expect(result.ready.map((n) => n.id)).toEqual(["E01-F01-T03"]);
+        expect(result.blocked.map((b) => b.node.id)).toEqual(["E01-F01-T02"]);
+        expect(result.blocked[0].waitingOn.map((w) => w.id)).toEqual(["E01-F01-T01"]);
+      },
+    );
+  });
+});

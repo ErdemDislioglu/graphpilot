@@ -9,9 +9,11 @@ planda adım adım yürütür — aynı işi elle yaptırmaya göre **ölçüleb
 token** harcayarak.
 
 ```
-/gp:plan   → brief + epic'ler
-/gp:expand → bir epic'i ihtiyaç anında feature/task'lara böl, flag'le
-/gp:run    → graph'ı yürüt: yönlendir → bağlamı izole et → yaz → kontrol et → düzelt → commit'le
+/gp:plan     → brief + epic'ler
+/gp:expand   → bir epic'i ihtiyaç anında feature/task'lara böl, flag'le
+/gp:run      → graph'ı yürüt: yönlendir → bağlamı izole et → yaz → kontrol et → düzelt → commit'le
+/gp:team     → aynısı, ama bir yönetici + junior/senior/tester/docs rolleri üzerinden
+gp autopilot → her iki döngüyü de insansız çalıştır, Telegram bildirim/onayıyla
 ```
 
 ## Neden
@@ -54,18 +56,33 @@ commit'le → indeksi güncelle — graph bitene kadar tekrarla.
 
 ## Durum
 
-GraphPilot, **11 fazlık yol haritasının 7. fazına kadar** uygulandı: graph şeması,
-tamamen test edilmiş bir `gp` CLI'ı, plugin iskeleti, intake/planlama, tembel
-genişletme, yürütme motoru (yaz → kontrol et → düzelt → commit, başarısızlıkta
-yükseltme ile) ve ayrı ayrı açılıp kapatılabilir bir token-optimizasyon katmanı.
-266 test geçiyor; CLI tip kontrolünden ve lint'ten temiz çıkıyor.
+GraphPilot'un çekirdeği (graph şeması, tamamen test edilmiş bir `gp` CLI'ı, plugin
+iskeleti, intake/planlama, tembel genişletme, yürütme motoru, ayrı ayrı açılıp
+kapatılabilir token-optimizasyon teknikleri ve kesinti sonrası devam dayanıklılığı)
+bitti — buna ek olarak, yol haritasında paketleme/yayından ÖNCEYE alınan iki yeni
+özellik de tamamlandı:
+
+- **Otopilot** — Telegram bildirimleri, butonlu onaylar, kullanım limiti dolduğunda
+  otomatik devam ve süreç yönetimiyle (`gp autopilot start|stop|status|logs`)
+  insansız/arka planda yürütme.
+- **Ekip modu** (`/gp:team`) — görevleri karmaşıklık/risk tag'lerine göre
+  junior/senior/tester/docs rollerine dağıtan, başarısızlıkları zincirde yukarı
+  taşıyan (junior → daha güçlü modelle junior → senior) ve güvenlik/mimari/kapsam
+  kararlarında — Telegram üzerinden ya da oturum içinde — onay isteyen bir yönetici;
+  her karar kayıtlı ve geri çevrilebilir.
+
+578 test geçiyor; CLI tip kontrolünden ve lint'ten temiz çıkıyor, ve bu testlerin
+HİÇBİRİ gerçek bir LLM API çağrısı harcamadı — tamamen deterministik kod üzerinde
+çalışıyor. Otopilot/ekip modunun gerçek bir Telegram botuyla uçtan uca canlı denemesi
+henüz yapılmadı, bu açıkça not düşüldü.
 
 Bu proje, **gerçekten doğrulanmış olanla varsayılanı** ayırmak konusunda alışılmadık
 bir titizlikle inşa edildi: her mimari karar [`docs/decisions.md`](docs/decisions.md)'de
 tarihli bir ADR olarak kanıtıyla birlikte kayıtlı; Claude Code'un kendi davranışına dair
 bu oturumda doğrulanamayan her iddia, ileri sürülmek yerine `DOĞRULANMADI` diye
-işaretlendi. Faz 8–11 (ham Claude Code'a karşı benchmark, kesinti sonrası
-dayanıklılık, paketleme/yayın, ucuz bir reviewer + API-test katmanı) henüz
+işaretlendi. Ham Claude Code'a karşı benchmark bilinçli olarak rafta — gerçek bir
+karşılaştırma üretmek ücretli API kullanımı gerektiriyor, şimdilik buna değmeyeceğine
+karar verildi. Paketleme/yayın ve ucuz bir reviewer + API-test katmanı henüz
 başlanmadı.
 
 ## Kurulum
@@ -84,6 +101,14 @@ Sonra, projenizin içinde:
 /gp:plan    # bir ürün brief'ini brief.md + epic'lere dönüştürür
 /gp:expand  # bir epic'i ihtiyaç anında flag'lenmiş feature/task'lara açar
 /gp:run     # graph'ı uçtan uca yürütür
+/gp:team    # aynısı, bir yönetici + junior/senior/tester/docs rolleri üzerinden (config.yml'de team.enabled: true gerekir)
+```
+
+Oturumda kalmak yerine Telegram bildirimleriyle insansız çalıştırmak için:
+
+```
+gp autopilot setup --token <bot-token'ınız>   # botu doğrular, chat'inizi bağlar
+gp autopilot start --agents-dir plugin/agents # arka planda çalışır; Telegram'dan /pause /resume /stop
 ```
 
 ## Depo yapısı
@@ -92,7 +117,7 @@ Sonra, projenizin içinde:
 cli/      `gp` CLI'ının TypeScript kaynağı (parse, validate, route, context, checks, hooks, ...)
 plugin/   Kurulabilir Claude Code plugin'i (agent'lar, skill'ler, hook'lar)
 docs/     Spesifikasyon (SPEC.md) ve mimari kararlar (decisions.md)
-bench/    Benchmark senaryoları ve sonuçları (Faz 7'nin ablasyon tablosu dahil)
+bench/    Benchmark senaryoları ve sonuçları (token-optimizasyon ablasyon tablosu dahil)
 ```
 
 ## Geliştirme
@@ -101,7 +126,7 @@ bench/    Benchmark senaryoları ve sonuçları (Faz 7'nin ablasyon tablosu dahi
 cd cli
 nvm use          # Node >=22 gerekli
 npm install
-npm test          # Vitest — 266 test
+npm test          # Vitest — 578 test
 npm run lint
 npm run build      # dist/ üretir, scripts/sync-cli-to-plugin.sh ile plugin/lib/'e senkronlanır
 ```

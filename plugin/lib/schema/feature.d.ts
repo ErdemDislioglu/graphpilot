@@ -13,6 +13,7 @@ export declare const FeatureFrontmatterSchema: z.ZodObject<{
         failed: "failed";
         blocked: "blocked";
         skipped: "skipped";
+        needs_decision: "needs_decision";
     }>;
     expanded: z.ZodBoolean;
     depends_on: z.ZodDefault<z.ZodArray<z.ZodString>>;

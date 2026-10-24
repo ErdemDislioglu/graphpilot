@@ -51,13 +51,18 @@ describe("runNodeHeadless — mock spawner", () => {
   });
 });
 
-describe("isRateLimitSignal — Faz 9.2 (DOĞRULANMADI, en-iyi-çaba desen eşleştirme)", () => {
+describe("isRateLimitSignal — Faz 9.2/12.1 (gerçek hata metinleri, errors.md'den doğrulandı)", () => {
   it.each([
     "Error: rate limit exceeded",
     "RATE_LIMIT reached, try again later",
     "429 Too Many Requests",
     "usage limit reached for this period",
     "monthly quota exceeded",
+    "You've hit your session limit",
+    "You've hit your weekly limit",
+    "You've hit your Opus limit",
+    "You've hit your monthly spend limit",
+    "Server is temporarily limiting requests",
   ])("'%s' içinde rate-limit sinyali bulur", (text) => {
     expect(isRateLimitSignal(text)).toBe(true);
   });

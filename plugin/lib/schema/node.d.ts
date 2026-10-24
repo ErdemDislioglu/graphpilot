@@ -21,6 +21,7 @@ export declare const NodeFrontmatterSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         failed: "failed";
         blocked: "blocked";
         skipped: "skipped";
+        needs_decision: "needs_decision";
     }>;
     expanded: z.ZodBoolean;
     depends_on: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -38,6 +39,7 @@ export declare const NodeFrontmatterSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         failed: "failed";
         blocked: "blocked";
         skipped: "skipped";
+        needs_decision: "needs_decision";
     }>;
     expanded: z.ZodBoolean;
     depends_on: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -84,6 +86,7 @@ export declare const NodeFrontmatterSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         auto: "auto";
         coder: "coder";
         tester: "tester";
+        senior: "senior";
     }>;
     depends_on: z.ZodDefault<z.ZodArray<z.ZodString>>;
     reads: z.ZodDefault<z.ZodArray<z.ZodString>>;
@@ -97,10 +100,19 @@ export declare const NodeFrontmatterSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         failed: "failed";
         blocked: "blocked";
         skipped: "skipped";
+        needs_decision: "needs_decision";
     }>;
     attempts: z.ZodDefault<z.ZodNumber>;
     scaffold_stack: z.ZodOptional<z.ZodString>;
     draft: z.ZodDefault<z.ZodBoolean>;
+    tags: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    assignee: z.ZodDefault<z.ZodEnum<{
+        docs: "docs";
+        auto: "auto";
+        tester: "tester";
+        senior: "senior";
+        junior: "junior";
+    }>>;
 }, z.core.$strict>, z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodLiteral<"knowledge">;

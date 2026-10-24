@@ -97,3 +97,106 @@ describe("ConfigSchema — mode_b.rate_limit_retry (Faz 9.2 eklemesi)", () => {
     });
   });
 });
+
+describe("ConfigSchema — autopilot (Faz 12.2 eklemesi)", () => {
+  it("hiç verilmezse roadmap 12.2'nin belgelenen varsayılanlarıyla dolar", () => {
+    const result = ConfigSchema.parse(MINIMAL);
+    expect(result.autopilot).toEqual({
+      enabled: false,
+      scope: "all",
+      notify: {
+        channel: "telegram",
+        on: ["epic_done", "phase_done", "failure", "limit", "finished"],
+        verbosity: "short",
+      },
+      approvals: { on_failure: "ask", timeout_minutes: 120, timeout_action: "stop", on_risk_high: false },
+      limits: { wait_for_reset: true, max_wait_hours: 12 },
+      language: "tr",
+    });
+  });
+
+  it("scope 'epic:E03' ve 'until:E05' biçimlerini kabul eder", () => {
+    expect(ConfigSchema.parse({ ...MINIMAL, autopilot: { scope: "epic:E03" } }).autopilot.scope).toBe(
+      "epic:E03",
+    );
+    expect(ConfigSchema.parse({ ...MINIMAL, autopilot: { scope: "until:E05" } }).autopilot.scope).toBe(
+      "until:E05",
+    );
+  });
+
+  it("scope geçersiz biçimde verilirse reddedilir", () => {
+    const result = ConfigSchema.safeParse({ ...MINIMAL, autopilot: { scope: "epic-E03" } });
+    expect(result.success).toBe(false);
+  });
+
+  it("quiet_hours 'SS:DD-SS:DD' biçimini kabul eder, geçersizi reddeder", () => {
+    expect(
+      ConfigSchema.parse({ ...MINIMAL, autopilot: { quiet_hours: "00:00-08:00" } }).autopilot.quiet_hours,
+    ).toBe("00:00-08:00");
+    const result = ConfigSchema.safeParse({ ...MINIMAL, autopilot: { quiet_hours: "geceyarısı" } });
+    expect(result.success).toBe(false);
+  });
+
+  it("notify kısmen override edilirse diğer alanlar varsayılanda kalır", () => {
+    const result = ConfigSchema.parse({ ...MINIMAL, autopilot: { notify: { verbosity: "detailed" } } });
+    expect(result.autopilot.notify.verbosity).toBe("detailed");
+    expect(result.autopilot.notify.channel).toBe("telegram");
+  });
+
+  it("autopilot içinde bilinmeyen anahtar reddedilir (strict — tipo yakalanır)", () => {
+    const result = ConfigSchema.safeParse({ ...MINIMAL, autopilot: { enabledx: true } });
+    expect(result.success).toBe(false);
+  });
+
+  it("language 'en' seçilebilir", () => {
+    expect(ConfigSchema.parse({ ...MINIMAL, autopilot: { language: "en" } }).autopilot.language).toBe("en");
+  });
+});
+
+describe("ConfigSchema — team (Faz 13.2 eklemesi)", () => {
+  it("hiç verilmezse roadmap 13.2'nin belgelenen varsayılanlarıyla dolar", () => {
+    const result = ConfigSchema.parse(MINIMAL);
+    expect(result.team).toEqual({
+      enabled: false,
+      manager: {
+        model: "sonnet",
+        consult_senior_for: ["architecture", "data_model", "security"],
+        autonomy: "balanced",
+      },
+      junior: { low: "haiku", med: "sonnet", max_parallel: 2 },
+      senior: { model: "opus", max_parallel: 1 },
+      tester: { model: "haiku", upgrade_to: "sonnet" },
+      reviewer: { enabled: true, triage: "haiku", deep: "sonnet" },
+      docs: { model: "haiku" },
+    });
+  });
+
+  it("team.enabled:true + manager.autonomy override edilebilir, diğerleri varsayılanda kalır", () => {
+    const result = ConfigSchema.parse({
+      ...MINIMAL,
+      team: { enabled: true, manager: { autonomy: "bold" } },
+    });
+    expect(result.team.enabled).toBe(true);
+    expect(result.team.manager.autonomy).toBe("bold");
+    expect(result.team.manager.model).toBe("sonnet");
+  });
+
+  it("junior.budget_pct 0-100 aralığında olmalı", () => {
+    expect(
+      ConfigSchema.parse({ ...MINIMAL, team: { junior: { budget_pct: 30 } } }).team.junior
+        .budget_pct,
+    ).toBe(30);
+    const result = ConfigSchema.safeParse({ ...MINIMAL, team: { junior: { budget_pct: 150 } } });
+    expect(result.success).toBe(false);
+  });
+
+  it("team içinde bilinmeyen anahtar reddedilir (strict)", () => {
+    const result = ConfigSchema.safeParse({ ...MINIMAL, team: { enabledx: true } });
+    expect(result.success).toBe(false);
+  });
+
+  it("manager.autonomy sadece cautious|balanced|bold kabul eder", () => {
+    const result = ConfigSchema.safeParse({ ...MINIMAL, team: { manager: { autonomy: "aggressive" } } });
+    expect(result.success).toBe(false);
+  });
+});

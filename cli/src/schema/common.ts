@@ -41,6 +41,12 @@ export const StatusSchema = z.enum([
   "failed",
   "blocked",
   "skipped",
+  // Faz 12.6 eklemesi — otopilot bir onay/karar bekliyor (risk:high, deadlock, yakınsamayan
+  // doğrulama döngüsü vb.). `blocked`'tan farkı: `blocked` bir BAŞKA düğümün durumuna bağlı
+  // (otomatik çözülür, o düğüm done olunca); `needs_decision` bir İNSAN kararına bağlı
+  // (otomatik çözülmez, `/gp:autopilot` onay akışı ya da elle `gp set ... status=pending`
+  // ile çözülür). Faz 13'ün kendi `status` sözlüğü de bu değeri kullanır.
+  "needs_decision",
 ]);
 export type Status = z.infer<typeof StatusSchema>;
 
@@ -61,8 +67,16 @@ export const TaskTypeSchema = z.enum([
 /** `fable` Faz 0 araştırmasına göre eklendi; varsayılan routing tablosu şu an kullanmıyor. */
 export const ModelSchema = z.enum(["auto", "haiku", "sonnet", "opus", "fable"]);
 
-/** `checker` dahili (fix-loop tarafından çağrılır), frontmatter'dan seçilemez. */
-export const AgentSchema = z.enum(["auto", "coder", "tester", "docs"]);
+/** `checker` dahili (fix-loop tarafından çağrılır), frontmatter'dan seçilemez.
+ * Faz 13 eklemesi: `senior` — ekip modunda "Junior" rolü zaten `coder` (Faz 0 bulgusu:
+ * agent varyantı gerekmiyor, model çağrı anında değişir), ama "Senior" GERÇEKTEN farklı
+ * bir sistem promptu/yetkiye sahip (bkz. `plugin/agents/senior.md`) — bu yüzden kendi
+ * agent değeri var. */
+export const AgentSchema = z.enum(["auto", "coder", "tester", "docs", "senior"]);
+
+/** Faz 13.3 — görev düğümüne elle atama override'ı. `auto`: 13.3'ün tag tablosundan
+ * deterministik olarak çözülür (`team/assign.ts`). Diğerleri tabloyu ELLE ezer. */
+export const AssigneeSchema = z.enum(["auto", "junior", "senior", "tester", "docs"]);
 
 /** İndeks satırı için tek satır özet — SPEC §3. */
 export const SummarySchema = z.string().max(100, "summary en fazla 100 karakter olmalı");

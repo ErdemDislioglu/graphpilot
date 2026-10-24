@@ -23,3 +23,5 @@ ve çalıştırmak — API'yi elle `curl` ile çağırmak değil, test dosyası 
 - Başarısız test çıktısında tüm logu değil, hata satırlarını özetle.
 - Bitince `## Handoff` bölümünü doldur (hangi senaryolar kapsandı, max ~300 token).
 - Kapsam dışı bir ihtiyaç görürsen yapma; Handoff'ta "Açık iş" olarak not et.
+- **Ekip üyeleri birbirine doğrudan erişemez (Faz 13 ekip modu).** Başka bir ekip
+  üyesine ihtiyaç duyarsan bunu Handoff'ta/bulgunda belirt; yönetici kendisi çağırır.

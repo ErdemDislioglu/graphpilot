@@ -346,3 +346,221 @@ describe("cli — gp run (Mod B)", () => {
     );
   });
 });
+
+describe("cli — gp autopilot (Faz 12.10)", () => {
+  it("status: kilit dosyası yoksa 'çalışmıyor' döner", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK), "config.yml": CONFIG_YML }, async (_graph, dir) => {
+      await run(["autopilot", "status", "-g", dir, "--json"]);
+      const parsed = JSON.parse(logs.join("\n"));
+      expect(parsed.running).toBe(false);
+    });
+  });
+
+  it("stop: kilit dosyası yoksa hatasız 'çalışmıyor' döner (exitCode set edilmez)", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK), "config.yml": CONFIG_YML }, async (_graph, dir) => {
+      await run(["autopilot", "stop", "-g", dir, "--json"]);
+      const parsed = JSON.parse(logs.join("\n"));
+      expect(parsed.stopped).toBe(false);
+      expect(process.exitCode).toBeFalsy();
+    });
+  });
+
+  it("logs: hiç log yoksa anlamlı mesaj döner, çökmez", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK), "config.yml": CONFIG_YML }, async (_graph, dir) => {
+      await run(["autopilot", "logs", "-g", dir, "--json"]);
+      const parsed = JSON.parse(logs.join("\n"));
+      expect(parsed.lines).toEqual([]);
+    });
+  });
+
+  it("start: autopilot.enabled false ise başlatmaz, anlamlı hata verir", async () => {
+    await withTempGraphAsync(
+      { "a.md": frontmatter(TASK), "config.yml": CONFIG_YML },
+      async (_graph, dir) => {
+        await run(["autopilot", "start", "-g", dir, "--agents-dir", dir]);
+        expect(errors.join("\n")).toContain("autopilot.enabled");
+        expect(process.exitCode).toBe(1);
+      },
+    );
+  });
+
+  it("start: zaten çalışan bir kilit varsa ikinci başlatmayı reddeder", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": frontmatter(TASK),
+        "config.yml": CONFIG_YML + "autopilot: { enabled: true }\n",
+      },
+      async (_graph, dir) => {
+        const { writeLock } = await import("../autopilot/processLock.js");
+        writeLock(dir, process.pid); // kendi PID'imiz — her zaman "canlı"
+        await run(["autopilot", "start", "-g", dir, "--agents-dir", dir]);
+        expect(errors.join("\n")).toContain("zaten çalışıyor");
+        expect(process.exitCode).toBe(1);
+      },
+    );
+  });
+
+  // "secrets yoksa hata ver" dalı KASITLI OLARAK burada test edilmiyor: `loadSecrets()`
+  // gerçek `~/.graphpilot/secrets.json`'u okur (cli.ts'te ev dizini enjekte edilebilir
+  // değil) — bu makinede o dosya zaten varsa test sahte bir şekilde başarısız/başarılı
+  // olurdu. Mantığın kendisi (`loadSecrets` null döner) `secrets.test.ts`'te enjekte
+  // edilmiş bir ev diziniyle hermetic olarak zaten test edildi.
+});
+
+describe("cli — gp team (Faz 13)", () => {
+  const TEAM_TASK = { ...TASK, complexity: "high" };
+
+  it("assign: complexity:high → senior", async () => {
+    await withTempGraphAsync(
+      { "a.md": frontmatter(TEAM_TASK), "config.yml": CONFIG_YML + "team: { enabled: true }\n" },
+      async (_graph, dir) => {
+        await run(["team", "assign", "E01-F01-T01", "-g", dir, "--json"]);
+        const parsed = JSON.parse(logs.join("\n"));
+        expect(parsed).toEqual({ role: "senior", model: "opus", agent: "senior" });
+      },
+    );
+  });
+
+  it("escalate: junior(haiku) → junior(sonnet)", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": frontmatter({ ...TASK, complexity: "low", model: "haiku" }),
+        "config.yml": CONFIG_YML + "team: { enabled: true }\n",
+      },
+      async (_graph, dir) => {
+        await run(["team", "escalate", "E01-F01-T01", "-g", dir, "--json"]);
+        const parsed = JSON.parse(logs.join("\n"));
+        expect(parsed.escalated).toBe(true);
+        expect(parsed.toRole).toBe("junior");
+        expect(parsed.toModel).toBe("sonnet");
+      },
+    );
+  });
+
+  it("decisions list: hiç karar yoksa boş dizi/anlamlı mesaj", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK), "config.yml": CONFIG_YML }, async (_graph, dir) => {
+      await run(["team", "decisions", "list", "-g", dir, "--json"]);
+      const parsed = JSON.parse(logs.join("\n"));
+      expect(parsed).toEqual([]);
+    });
+  });
+
+  it("decisions override: var olmayan id için anlamlı hata, exitCode=1", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK), "config.yml": CONFIG_YML }, async (_graph, dir) => {
+      await run(["team", "decisions", "override", "YOK-D1", "-g", dir]);
+      expect(errors.join("\n")).toContain("karar bulunamadı");
+      expect(process.exitCode).toBe(1);
+    });
+  });
+
+  it("stats: boş projede sıfırlarla döner, çökmez", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK), "config.yml": CONFIG_YML }, async (_graph, dir) => {
+      await run(["team", "stats", "-g", dir, "--json"]);
+      const parsed = JSON.parse(logs.join("\n"));
+      expect(parsed.doneTasks).toBe(0);
+      expect(parsed.misTagRatio).toBe(0);
+      expect(parsed.decisionsTotal).toBe(0);
+    });
+  });
+});
+
+describe("cli — gp team finding / finding-answer (Faz 13.7/13.9)", () => {
+  const SECURITY_FINDING_JSON = JSON.stringify({
+    kind: "security",
+    severity: "blocking",
+    summary: "Şifre sıfırlama token'ı süresiz",
+    options: ["15 dk sınır", "Olduğu gibi bırak", "Ayrı görev aç"],
+    recommended: 0,
+  });
+
+  const NON_BLOCKING_FINDING_JSON = JSON.stringify({
+    kind: "tech_debt",
+    severity: "non_blocking",
+    summary: "Tekrarlanan bir yardımcı fonksiyon var",
+    options: ["Şimdilik bırak", "Ayrı görev aç"],
+    recommended: 0,
+  });
+
+  it("non_blocking bulgu: hemen sonuçlanır, düğüme dokunmaz", async () => {
+    await withTempGraphAsync(
+      { "E01-x/epic.md": epicFrontmatterForTeam(), "E01-x/tasks/F01-T01-a.md": frontmatter(TASK), "config.yml": CONFIG_YML },
+      async (_graph, dir) => {
+        await run(["team", "finding", "E01-F01-T01", "--finding", NON_BLOCKING_FINDING_JSON, "-g", dir, "--json"]);
+        const parsed = JSON.parse(logs.join("\n"));
+        expect(parsed.outcome).toBe("proceeded_with_recommended");
+      },
+    );
+  });
+
+  it("bloklayan security bulgusu: needs_user_decision döner, düğümü needs_decision yapar", async () => {
+    await withTempGraphAsync(
+      { "E01-x/epic.md": epicFrontmatterForTeam(), "E01-x/tasks/F01-T01-a.md": frontmatter(TASK), "config.yml": CONFIG_YML },
+      async (_graph, dir) => {
+        await run(["team", "finding", "E01-F01-T01", "--finding", SECURITY_FINDING_JSON, "-g", dir, "--json"]);
+        const parsed = JSON.parse(logs.join("\n"));
+        expect(parsed.outcome).toBe("needs_user_decision");
+        expect(parsed.options).toHaveLength(3);
+      },
+    );
+  });
+
+  it("finding-answer: seçenek uygulanınca pending'e döner, karar kaydedilir", async () => {
+    await withTempGraphAsync(
+      { "E01-x/epic.md": epicFrontmatterForTeam(), "E01-x/tasks/F01-T01-a.md": frontmatter(TASK), "config.yml": CONFIG_YML },
+      async (_graph, dir) => {
+        await run(["team", "finding", "E01-F01-T01", "--finding", SECURITY_FINDING_JSON, "-g", dir]);
+        logs = [];
+        await run([
+          "team",
+          "finding-answer",
+          "E01-F01-T01",
+          "--finding",
+          SECURITY_FINDING_JSON,
+          "--answer",
+          "0",
+          "-g",
+          dir,
+          "--json",
+        ]);
+        const parsed = JSON.parse(logs.join("\n"));
+        expect(parsed).toEqual({ outcome: "user_chose", chosenOptionIndex: 0 });
+
+        logs = [];
+        await run(["team", "decisions", "list", "-g", dir, "--json"]);
+        const decisions = JSON.parse(logs.join("\n"));
+        expect(decisions).toHaveLength(1);
+      },
+    );
+  });
+
+  it("finding-answer: 'stop' durdurulur", async () => {
+    await withTempGraphAsync(
+      { "E01-x/epic.md": epicFrontmatterForTeam(), "E01-x/tasks/F01-T01-a.md": frontmatter(TASK), "config.yml": CONFIG_YML },
+      async (_graph, dir) => {
+        await run(["team", "finding", "E01-F01-T01", "--finding", SECURITY_FINDING_JSON, "-g", dir]);
+        await run([
+          "team",
+          "finding-answer",
+          "E01-F01-T01",
+          "--finding",
+          SECURITY_FINDING_JSON,
+          "--answer",
+          "stop",
+          "-g",
+          dir,
+          "--json",
+        ]);
+        logs = [];
+        await run(["status", "-g", dir, "--json"]);
+        const status = JSON.parse(logs.join("\n"));
+        expect(status.byStatus.failed).toBe(1);
+      },
+    );
+  });
+});
+
+function epicFrontmatterForTeam(): string {
+  const obj = { id: "E01", kind: "epic", name: "E01-x", summary: "s", status: "pending", expanded: true };
+  const lines = Object.entries(obj).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
+  return `---\n${lines.join("\n")}\n---\n## Epic\nx\n`;
+}
