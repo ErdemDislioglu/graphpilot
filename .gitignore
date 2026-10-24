@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.graph/_runtime/
+bench/results/raw/
+
+# plugin/lib/ ve plugin/package.json İZLENİR (ADR-009) — scripts/sync-cli-to-plugin.sh
+# tarafından üretilir, Faz 10'a kadar git'te tutulan geçici bir build artifact'ı.
+# plugin/node_modules/ zaten node_modules/ ile kapsanıyor; sadece kilit dosyasını
+# ve idempotency işaretçisini de ayrıca hariç tut.
+plugin/package-lock.json
+.install-stamp

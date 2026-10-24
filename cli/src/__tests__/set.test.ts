@@ -1,0 +1,67 @@
+import { readFileSync } from "node:fs";
+import matter from "gray-matter";
+import { describe, expect, it } from "vitest";
+import { setFrontmatter } from "../set.js";
+import { withTempGraph } from "../testUtils/tempGraph.js";
+
+const TASK = (overrides: Record<string, unknown>) => ({
+  id: "E01-F01-T01",
+  kind: "task",
+  name: "a",
+  level: 3,
+  summary: "s",
+  type: "feature",
+  complexity: "low",
+  risk: "low",
+  context_size: "small",
+  model: "auto",
+  agent: "auto",
+  context_budget: 8000,
+  status: "pending",
+  attempts: 0,
+  ...overrides,
+});
+
+function frontmatter(obj: Record<string, unknown>): string {
+  const lines = Object.entries(obj).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
+  return `---\n${lines.join("\n")}\n---\n## Görev\nx\n`;
+}
+
+describe("setFrontmatter", () => {
+  it("status=done, attempts=1 — string'ler mevcut alan tipine göre koerse edilir", () => {
+    withTempGraph({ "a.md": frontmatter(TASK({})) }, (graph, dir) => {
+      const result = setFrontmatter(graph, "E01-F01-T01", { status: "done", attempts: "1" });
+      expect(result.ok).toBe(true);
+
+      const after = matter(readFileSync(`${dir}/a.md`, "utf-8"));
+      expect(after.data.status).toBe("done");
+      expect(after.data.attempts).toBe(1); // sayıya koerse edildi, string "1" değil
+      expect(typeof after.data.attempts).toBe("number");
+    });
+  });
+
+  it("gövdeye dokunmaz", () => {
+    withTempGraph({ "a.md": frontmatter(TASK({})) }, (graph, dir) => {
+      setFrontmatter(graph, "E01-F01-T01", { status: "done" });
+      const after = matter(readFileSync(`${dir}/a.md`, "utf-8"));
+      expect(after.content.trim()).toBe("## Görev\nx");
+    });
+  });
+
+  it("geçersiz değer yazmaz — hata listesiyle geri döner, dosya değişmez", () => {
+    withTempGraph({ "a.md": frontmatter(TASK({})) }, (graph, dir) => {
+      const before = readFileSync(`${dir}/a.md`, "utf-8");
+      const result = setFrontmatter(graph, "E01-F01-T01", { status: "boyle-bir-durum-yok" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.errors.length).toBeGreaterThan(0);
+      expect(readFileSync(`${dir}/a.md`, "utf-8")).toBe(before);
+    });
+  });
+
+  it("var olmayan düğüm id'si hata döner", () => {
+    withTempGraph({ "a.md": frontmatter(TASK({})) }, (graph) => {
+      const result = setFrontmatter(graph, "E99-T99", { status: "done" });
+      expect(result.ok).toBe(false);
+    });
+  });
+});

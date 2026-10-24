@@ -1,0 +1,8 @@
+{
+  "name": "graphpilot",
+  "owner": { "name": "erdemdislioglu" },
+  "description": "GraphPilot — token-optimize graph orkestrasyon plugin'i (yerel geliştirme marketplace'i).",
+  "plugins": [
+    { "name": "gp", "source": "./plugin", "description": "Görevi graph'a bölen, flag'leyen ve yürüten orkestrasyon plugin'i." }
+  ]
+}

@@ -1,0 +1,120 @@
+import { appendMetric, readMetrics } from "./metrics.js";
+
+export interface FixLoopRound {
+  round: number;
+  issuesCount: number;
+  tokens?: number;
+}
+
+const FIX_LOOP_METRICS_FILE = "fix_loop.jsonl";
+
+/** SPEC/roadmap 6.3 — her tur `_metrics`'e ayrı kayıt (tur no, eksik sayısı, token). */
+export function recordFixLoopRound(
+  graphRootDir: string,
+  nodeId: string,
+  round: FixLoopRound,
+): void {
+  appendMetric(graphRootDir, FIX_LOOP_METRICS_FILE, {
+    node: nodeId,
+    ...round,
+    ts: new Date().toISOString(),
+  });
+}
+
+export function readFixLoopRounds(graphRootDir: string, nodeId: string): FixLoopRound[] {
+  return readMetrics(graphRootDir, FIX_LOOP_METRICS_FILE)
+    .filter((r) => r.node === nodeId)
+    .map((r) => ({
+      round: r.round as number,
+      issuesCount: r.issuesCount as number,
+      tokens: r.tokens as number | undefined,
+    }));
+}
+
+export interface FixLoopStatus {
+  shouldBreak: boolean;
+  reason: string;
+  converged: boolean;
+  roundsUsed: number;
+}
+
+/**
+ * SPEC/roadmap 6.3 "Frenler" — tur sınırı, yakınsama kontrolü, tur başına token bütçesi.
+ * Saf fonksiyon: geçmiş turların listesini alır, "devam et mi, kır mı" kararını döner.
+ * Orkestratör her turdan sonra bunu çağırır — kendi muhakemesine güvenmez (deterministik).
+ */
+export function computeFixLoopStatus(
+  rounds: FixLoopRound[],
+  opts: { maxRounds: number; nodeBudget?: number; breakIfNoProgress: boolean },
+): FixLoopStatus {
+  if (rounds.length === 0) {
+    return { shouldBreak: false, reason: "henüz tur yok", converged: false, roundsUsed: 0 };
+  }
+
+  const last = rounds[rounds.length - 1];
+  if (last.issuesCount === 0) {
+    return {
+      shouldBreak: true,
+      reason: "yakınsadı (0 eksik)",
+      converged: true,
+      roundsUsed: rounds.length,
+    };
+  }
+
+  if (rounds.length >= opts.maxRounds) {
+    return {
+      shouldBreak: true,
+      reason: `tur sınırına ulaşıldı (${opts.maxRounds})`,
+      converged: false,
+      roundsUsed: rounds.length,
+    };
+  }
+
+  if (opts.breakIfNoProgress && rounds.length >= 2) {
+    const prev = rounds[rounds.length - 2];
+    if (prev.issuesCount <= last.issuesCount) {
+      return {
+        shouldBreak: true,
+        reason: "ilerleme yok (eksik sayısı azalmadı/arttı)",
+        converged: false,
+        roundsUsed: rounds.length,
+      };
+    }
+  }
+
+  if (opts.nodeBudget) {
+    const totalTokens = rounds.reduce((sum, r) => sum + (r.tokens ?? 0), 0);
+    if (totalTokens > opts.nodeBudget * 2) {
+      return {
+        shouldBreak: true,
+        reason: `token bütçesinin 2 katı aşıldı (${totalTokens} > ${opts.nodeBudget * 2})`,
+        converged: false,
+        roundsUsed: rounds.length,
+      };
+    }
+  }
+
+  return { shouldBreak: false, reason: "devam et", converged: false, roundsUsed: rounds.length };
+}
+
+export interface FixLoopTokenRatio {
+  firstRoundTokens: number;
+  laterRoundsTokens: number;
+  /** `laterRoundsTokens / firstRoundTokens` — null ise ilk tur token'ı 0/bilinmiyor. */
+  ratio: number | null;
+}
+
+/**
+ * Roadmap 7.8 — "Ölç: tur başına token, ilk tur ile sonraki turların oranı". Düşük oran
+ * (sonraki turlar ilk turdan çok daha az token kullanıyor) doğrulama döngüsünün
+ * "sadece eksik listesi gönder" ilkesinin (6.3) işe yaradığının kanıtıdır.
+ */
+export function computeFixLoopTokenRatio(rounds: FixLoopRound[]): FixLoopTokenRatio {
+  const firstRoundTokens = rounds[0]?.tokens ?? 0;
+  const laterRoundsTokens = rounds.slice(1).reduce((sum, r) => sum + (r.tokens ?? 0), 0);
+  return {
+    firstRoundTokens,
+    laterRoundsTokens,
+    ratio: firstRoundTokens > 0 ? laterRoundsTokens / firstRoundTokens : null,
+  };
+}
