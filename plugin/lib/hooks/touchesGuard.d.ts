@@ -10,12 +10,22 @@ export declare function matchesAnyTouches(relPath: string, touchesPatterns: stri
 export interface RunningNodeTouches {
     nodeId: string;
     touches: string[];
+    /**
+     * Faz 14 B6 — `touches` dışında olsa da bu düğümün yazabileceği graph dosyaları: kendi
+     * düğüm dosyası (Handoff) ve `reads`'teki bilgi düğümleri. Proje köküne göre glob.
+     */
+    allowed: string[];
 }
 /**
  * `.graph/_runtime/<id>.context.md`'lerin embedded `## node` yaml bloğundan `touches`'ı
  * çıkarır — TAM graph parse'ı (fast-glob ile tüm .md'leri tarayan) YERİNE, sadece o anda
  * aktif olan (az sayıda) context dosyasını okur. Faz 7.3/ADR-005'in "hook hızlı kalmalı"
  * ilkesiyle aynı gerekçe.
+ *
+ * Faz 14 B5 — context dosyaları görev bittikten sonra da `_runtime/`'da kalıyor; eskiden
+ * hepsi "çalışan" sayılıyordu (pilotta liste her görevde büyüdü). Artık düğümün GÜNCEL
+ * durumu kendi dosyasından okunur ve yalnız `running` olanlar alınır. Düğüm dosyası
+ * bulunamazsa eski davranış korunur (uyarı sistemi — sessizce susmaktansa uyarmak).
  */
 export declare function readRunningNodesTouches(graphDir: string): RunningNodeTouches[];
 export interface TouchesViolation {
@@ -27,5 +37,7 @@ export interface TouchesViolation {
  * sayılır. `runningNodes` boşsa (hiç context dosyası yok — ör. plugin kurulu ama
  * `/gp:run` dışında elle bir Write) kontrol ATLANIR (false negative kabul edilebilir —
  * bu bir GÜVENLİK DUVARI değil, bir UYARI sistemi, bkz. roadmap "→ uyarı").
+ * Faz 14 B5: proje kökü dışındaki yollar (`../…`, mutlak — ör. `~/.claude/.../memory`)
+ * hiçbir düğümün kapsamı değildir, kontrol edilmez.
  */
 export declare function checkTouchesViolation(relPath: string, runningNodes: RunningNodeTouches[]): TouchesViolation | null;

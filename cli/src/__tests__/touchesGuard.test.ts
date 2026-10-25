@@ -76,7 +76,9 @@ describe("readRunningNodesTouches + checkTouchesViolation", () => {
         ].join("\n"),
       );
       const running = readRunningNodesTouches(dir);
-      expect(running).toEqual([{ nodeId: "E01-F01-T01", touches: ["src/**", "test/a.js"] }]);
+      expect(running).toEqual([
+        { nodeId: "E01-F01-T01", touches: ["src/**", "test/a.js"], allowed: [] },
+      ]);
 
       expect(checkTouchesViolation("src/ok.ts", running)).toBeNull();
       expect(checkTouchesViolation("other/not-covered.ts", running)).toEqual({
@@ -97,5 +99,72 @@ describe("readRunningNodesTouches + checkTouchesViolation", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Faz 14 B5/B6 — yalnız running düğümler, kendi dosyası ve reads izinli", () => {
+  const CONTEXT = (id: string, reads: string[] = []) =>
+    [
+      "## node",
+      "",
+      "```yaml",
+      `id: ${JSON.stringify(id)}`,
+      'touches: ["src/**"]',
+      `reads: ${JSON.stringify(reads)}`,
+      "```",
+      "",
+    ].join("\n");
+  const TASK_FILE = (id: string, status: string) => `---\nid: "${id}"\nkind: "task"\nstatus: ${status}\n---\n## Handoff\n`;
+
+  function setup(): { root: string; graphDir: string } {
+    const root = mkdtempSync(join(tmpdir(), "gp-touchesguard-b5-"));
+    const graphDir = join(root, ".graph");
+    mkdirSync(join(graphDir, "_runtime"), { recursive: true });
+    mkdirSync(join(graphDir, "E01-x", "tasks"), { recursive: true });
+    return { root, graphDir };
+  }
+
+  it("bitmiş (done) düğümün kalıntı context dosyası sayılmaz", () => {
+    const { root, graphDir } = setup();
+    try {
+      writeFileSync(join(graphDir, "_runtime", "E01-F01-T01.context.md"), CONTEXT("E01-F01-T01"));
+      writeFileSync(join(graphDir, "E01-x", "tasks", "F01-T01-a.md"), TASK_FILE("E01-F01-T01", "done"));
+      writeFileSync(join(graphDir, "_runtime", "E01-F01-T02.context.md"), CONTEXT("E01-F01-T02"));
+      writeFileSync(join(graphDir, "E01-x", "tasks", "F01-T02-b.md"), TASK_FILE("E01-F01-T02", '"running"'));
+      const running = readRunningNodesTouches(graphDir);
+      expect(running.map((n) => n.nodeId)).toEqual(["E01-F01-T02"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("kendi düğüm dosyası ve reads'teki bilgi düğümleri ihlal sayılmaz; başkası sayılır", () => {
+    const { root, graphDir } = setup();
+    try {
+      writeFileSync(
+        join(graphDir, "_runtime", "E01-F01-T01.context.md"),
+        CONTEXT("E01-F01-T01", ["[[http-helpers]]"]),
+      );
+      writeFileSync(join(graphDir, "E01-x", "tasks", "F01-T01-a.md"), TASK_FILE("E01-F01-T01", "running"));
+      const running = readRunningNodesTouches(graphDir);
+      expect(running[0].allowed).toEqual([
+        ".graph/E01-x/tasks/F01-T01-a.md",
+        ".graph/**/knowledge/http-helpers.md",
+      ]);
+      expect(checkTouchesViolation(".graph/E01-x/tasks/F01-T01-a.md", running)).toBeNull();
+      expect(checkTouchesViolation(".graph/_shared/knowledge/http-helpers.md", running)).toBeNull();
+      expect(checkTouchesViolation(".graph/E01-x/knowledge/http-helpers.md", running)).toBeNull();
+      expect(checkTouchesViolation(".graph/_shared/knowledge/baska.md", running)).not.toBeNull();
+      expect(checkTouchesViolation(".graph/E01-x/tasks/F01-T02-b.md", running)).not.toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("proje kökü dışındaki yollar kontrol edilmez", () => {
+    const running = [{ nodeId: "E01-F01-T01", touches: ["src/**"], allowed: [] }];
+    expect(checkTouchesViolation("../../.claude/projects/x/memory/a.md", running)).toBeNull();
+    expect(checkTouchesViolation("/Users/x/.claude/memory/a.md", running)).toBeNull();
+    expect(checkTouchesViolation("lib/a.js", running)).not.toBeNull();
   });
 });

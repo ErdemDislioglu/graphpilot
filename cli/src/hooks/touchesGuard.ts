@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 /**
@@ -38,6 +38,42 @@ export function matchesAnyTouches(relPath: string, touchesPatterns: string[]): b
 export interface RunningNodeTouches {
   nodeId: string;
   touches: string[];
+  /**
+   * Faz 14 B6 — `touches` dışında olsa da bu düğümün yazabileceği graph dosyaları: kendi
+   * düğüm dosyası (Handoff) ve `reads`'teki bilgi düğümleri. Proje köküne göre glob.
+   */
+  allowed: string[];
+}
+
+/**
+ * `E01-F01-T01` → `.graph/E01-*\/tasks/F01-T01-*.md`. Tam graph parse'ı yerine iki
+ * `readdir` — hook hızlı kalmalı (ADR-005). Bulunamazsa `null`.
+ */
+function findTaskFile(graphDir: string, nodeId: string): string | null {
+  const [epic, ...rest] = nodeId.split("-");
+  if (!epic || rest.length === 0) return null;
+  const prefix = `${rest.join("-")}-`;
+  try {
+    for (const dir of readdirSync(graphDir)) {
+      if (dir !== epic && !dir.startsWith(`${epic}-`)) continue;
+      const tasksDir = join(graphDir, dir, "tasks");
+      const file = readdirSync(tasksDir).find((f) => f.startsWith(prefix) && f.endsWith(".md"));
+      if (file) return join(tasksDir, file);
+    }
+  } catch {
+    // okunamayan dizin — düğüm dosyası bilinmiyor
+  }
+  return null;
+}
+
+function readStatus(filePath: string): string | null {
+  try {
+    const match = readFileSync(filePath, "utf-8").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const status = match?.[1].match(/^status:\s*["']?([a-z_]+)/m);
+    return status ? status[1] : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -45,6 +81,11 @@ export interface RunningNodeTouches {
  * çıkarır — TAM graph parse'ı (fast-glob ile tüm .md'leri tarayan) YERİNE, sadece o anda
  * aktif olan (az sayıda) context dosyasını okur. Faz 7.3/ADR-005'in "hook hızlı kalmalı"
  * ilkesiyle aynı gerekçe.
+ *
+ * Faz 14 B5 — context dosyaları görev bittikten sonra da `_runtime/`'da kalıyor; eskiden
+ * hepsi "çalışan" sayılıyordu (pilotta liste her görevde büyüdü). Artık düğümün GÜNCEL
+ * durumu kendi dosyasından okunur ve yalnız `running` olanlar alınır. Düğüm dosyası
+ * bulunamazsa eski davranış korunur (uyarı sistemi — sessizce susmaktansa uyarmak).
  */
 export function readRunningNodesTouches(graphDir: string): RunningNodeTouches[] {
   const runtimeDir = join(graphDir, "_runtime");
@@ -61,11 +102,20 @@ export function readRunningNodesTouches(graphDir: string): RunningNodeTouches[] 
       const content = readFileSync(join(runtimeDir, file), "utf-8");
       const match = content.match(/## node\s*\n\s*```yaml\n([\s\S]*?)\n```/);
       if (!match) continue;
-      const parsed = parseYaml(match[1]) as { id?: unknown; touches?: unknown };
+      const parsed = parseYaml(match[1]) as { id?: unknown; touches?: unknown; reads?: unknown };
       if (typeof parsed.id !== "string" || !Array.isArray(parsed.touches)) continue;
+      const nodeFile = findTaskFile(graphDir, parsed.id);
+      if (nodeFile && readStatus(nodeFile) !== "running") continue;
+      const graphRel = relative(dirname(graphDir), graphDir) || ".graph";
+      const allowed = nodeFile ? [relative(dirname(graphDir), nodeFile)] : [];
+      for (const entry of Array.isArray(parsed.reads) ? parsed.reads : []) {
+        const name = typeof entry === "string" ? /^\[\[([a-z][a-z0-9-]*)\]\]$/.exec(entry)?.[1] : undefined;
+        if (name) allowed.push(`${graphRel}/**/knowledge/${name}.md`);
+      }
       out.push({
         nodeId: parsed.id,
         touches: parsed.touches.filter((t): t is string => typeof t === "string"),
+        allowed,
       });
     } catch {
       // Bu context dosyası okunamadı/bozuk — yoksay, hook ASLA bu yüzden çökmemeli.
@@ -84,13 +134,18 @@ export interface TouchesViolation {
  * sayılır. `runningNodes` boşsa (hiç context dosyası yok — ör. plugin kurulu ama
  * `/gp:run` dışında elle bir Write) kontrol ATLANIR (false negative kabul edilebilir —
  * bu bir GÜVENLİK DUVARI değil, bir UYARI sistemi, bkz. roadmap "→ uyarı").
+ * Faz 14 B5: proje kökü dışındaki yollar (`../…`, mutlak — ör. `~/.claude/.../memory`)
+ * hiçbir düğümün kapsamı değildir, kontrol edilmez.
  */
 export function checkTouchesViolation(
   relPath: string,
   runningNodes: RunningNodeTouches[],
 ): TouchesViolation | null {
   if (runningNodes.length === 0) return null;
-  const covered = runningNodes.some((n) => matchesAnyTouches(relPath, n.touches));
+  if (isAbsolute(relPath) || relPath === ".." || relPath.startsWith("../")) return null;
+  const covered = runningNodes.some(
+    (n) => matchesAnyTouches(relPath, n.touches) || matchesAnyTouches(relPath, n.allowed),
+  );
   if (covered) return null;
   return { path: relPath, checkedAgainst: runningNodes };
 }
