@@ -1,3 +1,4 @@
+import type { GitRunner } from "../check.js";
 import { type ClaudeHeadlessSpawner } from "../runModeB.js";
 import { type Lang } from "./messages.js";
 import type { Notifier } from "./notifier.js";
@@ -24,6 +25,10 @@ export interface AutopilotLoopOptions {
     /** SADECE test için: `runNodeHeadlessWithRetry`'nin KISA retry katmanına (Faz 9.2)
      * enjekte edilir — verilmezse üretimdeki gerçek `execSync('sleep N')` davranışı korunur. */
     shortRetrySleep?: (seconds: number) => void;
+    /** Faz 12.13 — git komutlarının çalıştığı kök; verilmezse `graphRootDir`'in üstü. */
+    projectRoot?: string;
+    /** SADECE test için: `autopilot.git` adımlarındaki git çağrıları. */
+    git?: GitRunner;
 }
 /**
  * Roadmap 12 (mimari) — "Yürütücü" + "Zamanlayıcı" + "Onay kuyruğu"nu tek bir döngüde

@@ -52,6 +52,12 @@ declare const AutopilotSchema: z.ZodObject<{
         tr: "tr";
         en: "en";
     }>>;
+    idle_wait: z.ZodDefault<z.ZodBoolean>;
+    git: z.ZodDefault<z.ZodObject<{
+        commit: z.ZodDefault<z.ZodBoolean>;
+        branch_per_epic: z.ZodDefault<z.ZodBoolean>;
+        push_on_epic_done: z.ZodDefault<z.ZodBoolean>;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 declare const TeamSchema: z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
@@ -315,6 +321,12 @@ export declare const ConfigSchema: z.ZodObject<{
             tr: "tr";
             en: "en";
         }>>;
+        idle_wait: z.ZodDefault<z.ZodBoolean>;
+        git: z.ZodDefault<z.ZodObject<{
+            commit: z.ZodDefault<z.ZodBoolean>;
+            branch_per_epic: z.ZodDefault<z.ZodBoolean>;
+            push_on_epic_done: z.ZodDefault<z.ZodBoolean>;
+        }, z.core.$strict>>;
     }, z.core.$strict>>;
     efficiency: z.ZodDefault<z.ZodObject<{
         small_epic_max_features: z.ZodDefault<z.ZodNumber>;

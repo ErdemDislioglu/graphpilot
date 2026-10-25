@@ -1,7 +1,7 @@
 {
   "name": "gp",
   "displayName": "GraphPilot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Görevi linkli markdown graph'ına bölen, flag'leyen, doğru modele yönlendiren ve arka planda adım adım yürüten token-optimize orkestrasyon plugin'i.",
   "keywords": ["orchestration", "graph", "token-optimization", "agents"],
   "author": { "name": "erdemdislioglu" },

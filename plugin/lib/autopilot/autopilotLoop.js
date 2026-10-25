@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseGraph } from "../graph/parser.js";
 import { computeNext } from "../next.js";
 import { computeDeadlockReport } from "../deadlock.js";
@@ -20,6 +20,7 @@ import { resolveTeamRoute } from "../team/assign.js";
 import { escalateTeamNode } from "../team/teamEscalate.js";
 import { epicDoneMessage, finishedMessage, resumeMessage } from "./messages.js";
 import { isWithinQuietHours } from "./quietHours.js";
+import { checkoutBranch, commitAll, epicBranchName, epicsListText, expandCandidateInScope, expandHeadless, helpText, inScope, parseRunTarget, pushCurrentBranch, scopeDone, } from "./epicRun.js";
 /**
  * Roadmap 12.2/12.5 — `quiet_hours`: "bu saatlerde sadece kritik mesaj". Rutin ilerleme
  * bildirimleri (epic bitti, limit sonrası devam edildi) bu pencerede ERTELENMEZ, tamamen
@@ -101,6 +102,10 @@ async function executeNodeWithLimitHandling(nodeId, opts) {
         if (result.ok) {
             setFrontmatter(loadFresh(graphRootDir).graph, node.id, { status: "done" });
             emitEvent(graphRootDir, { type: "node_done", nodeId: node.id });
+            if (config.autopilot.git.commit) {
+                const summary = String(node.frontmatter.summary ?? "");
+                commitAll(opts.projectRoot ?? dirname(graphRootDir), `gp(${node.id}): ${summary}`, opts.git);
+            }
             return { kind: "done" };
         }
         if (!result.rateLimited) {
@@ -179,8 +184,31 @@ export async function runAutopilotLoop(options) {
     // girildiğinde, her turda tekrar DEĞİL) + 4 saatlik periyodik hatırlatma.
     let idleWaitingNoticeSent = false;
     let lastReminderAt = 0;
-    poller.onCommandMessage((_chatId, command) => {
+    // Faz 12.13 — `/run <EPIC>` kapsamı config'teki `autopilot.scope`'un yerine geçer;
+    // komut dinleyicide yalnız kaydedilir, dal/genişletme işi döngünün başında yapılır.
+    let scopeOverride;
+    let pendingRunEpicId;
+    // `idle_wait` açıkken kapsam bitti ya da genişletme başarısız oldu: yeni bir `/run`
+    // gelene kadar yalnız komut dinlenir.
+    let waitingForCommand = false;
+    poller.onCommandMessage((_chatId, command, args) => {
         switch (command) {
+            case "/run": {
+                const target = parseRunTarget(loadFresh(graphRootDir).graph, args, lang);
+                if (!target.ok) {
+                    void notifier.send(`⚠️ ${target.error}`);
+                    break;
+                }
+                pendingRunEpicId = target.epic.id;
+                break;
+            }
+            case "/epics":
+                void notifier.send(epicsListText(loadFresh(graphRootDir).graph, lang));
+                break;
+            case "/help":
+            case "/start":
+                void notifier.send(helpText(lang));
+                break;
             case "/pause":
                 paused = true;
                 void notifier.send(lang === "tr" ? "⏸ Duraklatıldı." : "⏸ Paused.");
@@ -234,17 +262,58 @@ export async function runAutopilotLoop(options) {
             await sleep(opts.pollIntervalMs ?? 2_000);
             continue;
         }
-        const { graph, config } = loadFresh(graphRootDir);
-        const next = computeNext(graph, { limit: 1 });
-        if (next.ready.length > 0) {
+        if (pendingRunEpicId) {
+            const epicId = pendingRunEpicId;
+            pendingRunEpicId = undefined;
+            scopeOverride = `epic:${epicId}`;
+            waitingForCommand = false;
             idleWaitingNoticeSent = false;
-            const outcome = await executeNodeWithLimitHandling(next.ready[0].id, opts);
+            const { graph: g, config: c } = loadFresh(graphRootDir);
+            let branchNote = "";
+            if (c.autopilot.git.branch_per_epic) {
+                const branch = epicBranchName(g.nodesById.get(epicId));
+                const ok = checkoutBranch(opts.projectRoot ?? dirname(graphRootDir), branch, opts.git);
+                branchNote = ok ? ` · ${lang === "tr" ? "dal" : "branch"}: ${branch}` : ` · ⚠️ ${branch} açılamadı`;
+            }
+            await notifier.send(lang === "tr" ? `▶️ ${epicId} başlatılıyor${branchNote}` : `▶️ Starting ${epicId}${branchNote}`);
+        }
+        if (waitingForCommand) {
+            await sleep(opts.pollIntervalMs ?? 2_000);
+            continue;
+        }
+        const { graph, config } = loadFresh(graphRootDir);
+        const scope = scopeOverride ?? config.autopilot.scope;
+        const next = computeNext(graph);
+        const readyInScope = next.ready.filter((n) => inScope(n, scope));
+        if (readyInScope.length > 0) {
+            idleWaitingNoticeSent = false;
+            const outcome = await executeNodeWithLimitHandling(readyInScope[0].id, opts);
             if (outcome.kind === "stop")
                 return { processedCount, stopReason: outcome.reason };
             if (outcome.kind === "done") {
                 processedCount += 1;
-                await handleEpicCompletionIfAny(next.ready[0].id, opts);
+                await handleEpicCompletionIfAny(readyInScope[0].id, opts);
             }
+            continue;
+        }
+        // Faz 12.13 — hazır görev yoksa kapsamdaki ilk açılmamış epic/feature'ı headless
+        // planner'la genişlet. "all" kapsamında yapılmaz: eski davranış (yalnız var olan
+        // task'lar) korunur, otopilot kendiliğinden tüm projeyi açmaya başlamaz.
+        const candidate = scope === "all" ? undefined : expandCandidateInScope(graph, scope);
+        if (candidate) {
+            const expansion = expandHeadless(candidate, { agentsDir: opts.agentsDir, config, spawner: opts.spawner });
+            const stillClosed = loadFresh(graphRootDir).graph.nodesById.get(candidate.id)?.frontmatter.expanded === false;
+            if (expansion.ok && !stillClosed) {
+                await sendRoutine(notifier, config, now, lang === "tr" ? `🧩 ${candidate.id} görevlere bölündü.` : `🧩 ${candidate.id} expanded.`);
+                continue;
+            }
+            emitEvent(graphRootDir, { type: "failure", nodeId: candidate.id, message: "expansion_failed" });
+            await notifier.send(lang === "tr"
+                ? `🛑 ${candidate.id} görevlere bölünemedi (${expansion.error ?? "planner graph'ı güncellemedi"}). /run ile tekrar dene.`
+                : `🛑 Could not expand ${candidate.id} (${expansion.error ?? "planner did not update the graph"}). Retry with /run.`);
+            if (!config.autopilot.idle_wait)
+                return { processedCount, stopReason: "finished" };
+            waitingForCommand = true;
             continue;
         }
         const deadlock = computeDeadlockReport(graph);
@@ -270,7 +339,17 @@ export async function runAutopilotLoop(options) {
             continue;
         }
         const { done, total } = countTasks(graph);
-        if (total > 0 && done === total) {
+        const finished = scope === "all" ? total > 0 && done === total : scopeDone(graph, scope);
+        if (finished && config.autopilot.idle_wait) {
+            // Faz 12.13 — kapanmak yerine bir kez bildirip komut bekle.
+            emitEvent(graphRootDir, { type: "finished" });
+            await notifier.send(lang === "tr"
+                ? `🏁 ${scope} tamamlandı. Sıradaki için /run <EPIC> yaz (liste: /epics).`
+                : `🏁 ${scope} done. Send /run <EPIC> to continue (see /epics).`);
+            waitingForCommand = true;
+            continue;
+        }
+        if (finished) {
             emitEvent(graphRootDir, { type: "finished" });
             await notifier.send(finishedMessage(lang, {
                 taskCount: total,
@@ -313,10 +392,18 @@ async function handleEpicCompletionIfAny(justFinishedNodeId, opts) {
         return;
     emitEvent(opts.graphRootDir, { type: "epic_done", epicId: node.epicId });
     const epicNode = graph.nodesById.get(node.epicId);
+    let pushNote = "";
+    if (config.autopilot.git.push_on_epic_done) {
+        const pushed = pushCurrentBranch(opts.projectRoot ?? dirname(opts.graphRootDir), opts.git);
+        if (opts.lang === "tr")
+            pushNote = pushed ? " · ⬆️ dal push'landı" : " · ⚠️ push başarısız";
+        else
+            pushNote = pushed ? " · ⬆️ branch pushed" : " · ⚠️ push failed";
+    }
     await sendRoutine(opts.notifier, config, opts.now, epicDoneMessage(opts.lang, {
         epicId: node.epicId,
         epicTitle: epicNode?.name ?? node.epicId,
         taskCount: epicDone.total,
         tokens: 0,
-    }).text);
+    }).text + pushNote);
 }

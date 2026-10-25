@@ -110,6 +110,15 @@ const AutopilotLimitsSchema = z
     max_wait_hours: z.number().int().positive().default(12),
 })
     .strict();
+// Faz 12.13 (pilot isteği) — otopilotun git davranışı. Hepsi varsayılan false: açıkça
+// açılmadan otopilot eskisi gibi commit atmaz, dal açmaz, push etmez.
+const AutopilotGitSchema = z
+    .object({
+    commit: z.boolean().default(false),
+    branch_per_epic: z.boolean().default(false),
+    push_on_epic_done: z.boolean().default(false),
+})
+    .strict();
 // "00:00-08:00" biçimi — roadmap örneğiyle birebir.
 const QUIET_HOURS_RE = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
 // "all" | "epic:E03" | "until:E05" — roadmap örneğiyle birebir.
@@ -135,6 +144,9 @@ const AutopilotSchema = z
     // diyor — brief'ten otomatik tespit şu an tanımlı değil (SPEC.md'de yapılandırılmış bir
     // `language` alanı yok), bu yüzden burada açık bir alan olarak eklendi.
     language: z.enum(["tr", "en"]).default("tr"),
+    // Faz 12.13 — true ise kapsam bitince süreç kapanmaz, Telegram'dan `/run <EPIC>` bekler.
+    idle_wait: z.boolean().default(false),
+    git: AutopilotGitSchema.default({ commit: false, branch_per_epic: false, push_on_epic_done: false }),
 })
     .strict();
 /**
@@ -285,6 +297,8 @@ export const ConfigSchema = z
         approvals: { on_failure: "ask", timeout_minutes: 120, timeout_action: "stop", on_risk_high: false },
         limits: { wait_for_reset: true, max_wait_hours: 12 },
         language: "tr",
+        idle_wait: false,
+        git: { commit: false, branch_per_epic: false, push_on_epic_done: false },
     }),
     efficiency: EfficiencySchema.default(DEFAULT_EFFICIENCY),
     team: TeamSchema.default({

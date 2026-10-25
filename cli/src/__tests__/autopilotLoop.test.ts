@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import matter from "gray-matter";
 import { describe, expect, it, vi } from "vitest";
@@ -452,6 +452,197 @@ describe("runAutopilotLoop — /questions ve 4 saatlik hatırlatma (Faz 13.9/13.
 
         const questionsAnswer = notifier.sent.find((m) => m.includes("E01-F01-T01"));
         expect(questionsAnswer).toBeTruthy();
+      },
+    );
+  });
+});
+
+describe("runAutopilotLoop — Telegram'dan /run <EPIC> (Faz 12.13)", () => {
+  const RUN_CONFIG_YML =
+    "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
+    "budgets: { default_context: 8000, max_turns: 25 }\n" +
+    "mode_b: { rate_limit_retry: { enabled: true, wait_seconds: 1, max_retries: 1 } }\n" +
+    "team: { enabled: false }\n" +
+    'autopilot: { scope: "epic:E01", idle_wait: true, ' +
+    "git: { commit: true, branch_per_epic: true, push_on_epic_done: true } }\n";
+  const fm = (obj: Record<string, unknown>): string =>
+    `---\n${Object.entries(obj)
+      .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+      .join("\n")}\n---\n`;
+  const epic = (id: string, expanded: boolean) =>
+    fm({
+      id,
+      kind: "epic",
+      name: `${id}-tasarim`,
+      summary: "s",
+      status: "pending",
+      expanded,
+      depends_on: [],
+    });
+  const feature = (id: string) =>
+    fm({
+      id,
+      kind: "feature",
+      name: `${id}-f`,
+      summary: "s",
+      status: "pending",
+      expanded: true,
+      depends_on: [],
+    });
+
+  it("bitmiş kapsamda bekler, /run e02 ile dal açar, epic'i genişletir, görevi commit'ler, push'lar ve tekrar bekler", async () => {
+    await withTempGraphAsync(
+      {
+        "e1.md": epic("E01", true),
+        "f1.md": feature("E01-F01"),
+        "t1.md": taskFrontmatter({ status: "done" }),
+        "e2.md": epic("E02", false),
+        "config.yml": RUN_CONFIG_YML,
+        "coder.md": CODER_MD,
+        "planner.md": "---\ntools: Read,Bash\n---\nSen planner'sın.\n",
+      },
+      async (_graph, dir) => {
+        const notifier = new MockNotifier();
+        let polls = 0;
+        const message = (text: string) => ({
+          json: async () => ({
+            ok: true,
+            result: [{ update_id: polls, message: { message_id: polls, chat: { id: 7 }, text } }],
+          }),
+        });
+        const empty = { json: async () => ({ ok: true, result: [] }) };
+        const fetchFn = vi.fn().mockImplementation(async () => {
+          polls += 1;
+          if (polls > 200) return message("/stop"); // güvenlik: döngü takılırsa test asılı kalmasın
+          const idleNotices = notifier.sent.filter((m) => m.startsWith("🏁")).length;
+          if (idleNotices === 1 && !notifier.sent.some((m) => m.startsWith("▶️")))
+            return message("/run e02");
+          if (idleNotices === 2) return message("/stop");
+          return empty;
+        });
+        const poller = new TelegramPoller(
+          new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch),
+          7,
+        );
+
+        const prompts: string[] = [];
+        const spawner: ClaudeHeadlessSpawner = (args) => {
+          const prompt = args[1];
+          prompts.push(prompt);
+          if (prompt.startsWith("MOD: GENİŞLETME-FEATURE")) {
+            // Sahte planner: E02'yi bir feature + bir task ile açar.
+            writeFileSync(join(dir, "e2.md"), epic("E02", true));
+            writeFileSync(join(dir, "f2.md"), feature("E02-F01"));
+            writeFileSync(
+              join(dir, "t2.md"),
+              taskFrontmatter({ id: "E02-F01-T01", name: "b", summary: "yeni görev" }),
+            );
+          }
+          return { stdout: "{}", stderr: "", status: 0 };
+        };
+        const gitCalls: string[] = [];
+        const git = (args: string[]) => {
+          const key = args.join(" ");
+          gitCalls.push(key);
+          if (key === "rev-parse --is-inside-work-tree") return { stdout: "true\n", status: 0 };
+          if (key === "rev-parse --abbrev-ref HEAD") return { stdout: "main\n", status: 0 };
+          if (key === "checkout -q feature/E02-tasarim") return { stdout: "", status: 1 };
+          if (key === "diff --cached --quiet") return { stdout: "", status: 1 };
+          return { stdout: "", status: 0 };
+        };
+
+        const result = await runAutopilotLoop({
+          graphRootDir: dir,
+          agentsDir: dir,
+          notifier,
+          poller,
+          lang: "tr",
+          spawner,
+          sleep: instantSleep,
+          shortRetrySleep: noopShortRetrySleep,
+          projectRoot: "/proje",
+          git,
+        });
+
+        expect(result).toEqual({ processedCount: 1, stopReason: "user_stop" });
+        expect(prompts.map((p) => p.split("\n")[0])).toEqual([
+          "MOD: GENİŞLETME-FEATURE",
+          expect.any(String),
+        ]);
+        expect(notifier.sent).toEqual(
+          expect.arrayContaining([
+            "🏁 epic:E01 tamamlandı. Sıradaki için /run <EPIC> yaz (liste: /epics).",
+            "▶️ E02 başlatılıyor · dal: feature/E02-tasarim",
+            "🧩 E02 görevlere bölündü.",
+            "🏁 epic:E02 tamamlandı. Sıradaki için /run <EPIC> yaz (liste: /epics).",
+          ]),
+        );
+        expect(
+          notifier.sent.some((m) => m.startsWith("✅ E02") && m.endsWith("⬆️ dal push'landı")),
+        ).toBe(true);
+        expect(gitCalls).toEqual(
+          expect.arrayContaining([
+            "checkout -q -b feature/E02-tasarim",
+            "commit -q -m gp(E02-F01-T01): yeni görev",
+            "push -q -u origin HEAD",
+          ]),
+        );
+        const task = matter(readFileSync(join(dir, "t2.md"), "utf-8"));
+        expect(task.data.status).toBe("done");
+      },
+    );
+  });
+
+  it("/run'a geçersiz epic verilirse uyarır ve hiçbir şey başlatmaz; /epics ve /help cevaplanır", async () => {
+    await withTempGraphAsync(
+      {
+        "e1.md": epic("E01", true),
+        "f1.md": feature("E01-F01"),
+        "t1.md": taskFrontmatter({ status: "done" }),
+        "config.yml": RUN_CONFIG_YML,
+        "coder.md": CODER_MD,
+      },
+      async (_graph, dir) => {
+        const notifier = new MockNotifier();
+        const script = ["/run E99", "/run E01", "/epics", "/help", "/stop"];
+        let i = 0;
+        const fetchFn = vi.fn().mockImplementation(async () => {
+          const text = i > 200 ? "/stop" : script[i];
+          i += 1;
+          return {
+            json: async () => ({
+              ok: true,
+              result: text
+                ? [{ update_id: i, message: { message_id: i, chat: { id: 7 }, text } }]
+                : [],
+            }),
+          };
+        });
+        const poller = new TelegramPoller(
+          new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch),
+          7,
+        );
+        const spawner: ClaudeHeadlessSpawner = () => {
+          throw new Error("hiçbir agent çalıştırılmamalıydı");
+        };
+
+        const result = await runAutopilotLoop({
+          graphRootDir: dir,
+          agentsDir: dir,
+          notifier,
+          poller,
+          lang: "tr",
+          spawner,
+          sleep: instantSleep,
+          shortRetrySleep: noopShortRetrySleep,
+        });
+
+        expect(result.stopReason).toBe("user_stop");
+        expect(notifier.sent).toContain("⚠️ Epic bulunamadı: E99 (liste: /epics)");
+        expect(notifier.sent).toContain("⚠️ E01 zaten tamamlandı.");
+        expect(notifier.sent.some((m) => m.startsWith("📚 Epic'ler:\n✅ E01"))).toBe(true);
+        expect(notifier.sent.some((m) => m.startsWith("🤖 Komutlar:"))).toBe(true);
+        expect(notifier.sent.some((m) => m.startsWith("▶️"))).toBe(false);
       },
     );
   });

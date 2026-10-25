@@ -112,6 +112,8 @@ describe("ConfigSchema — autopilot (Faz 12.2 eklemesi)", () => {
       approvals: { on_failure: "ask", timeout_minutes: 120, timeout_action: "stop", on_risk_high: false },
       limits: { wait_for_reset: true, max_wait_hours: 12 },
       language: "tr",
+      idle_wait: false,
+      git: { commit: false, branch_per_epic: false, push_on_epic_done: false },
     });
   });
 
