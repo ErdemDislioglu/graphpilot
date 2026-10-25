@@ -10,7 +10,15 @@ export declare class TelegramNotifier implements Notifier {
     private readonly client;
     private readonly chatId;
     private readonly poller;
-    constructor(client: TelegramClient, chatId: number | string, poller: TelegramPoller);
+    /** Faz 12.13 — `ask()`'ın soru mesajı ağ hatasında bu aralıkla yeniden denenir. */
+    private readonly retry;
+    constructor(client: TelegramClient, chatId: number | string, poller: TelegramPoller, 
+    /** Faz 12.13 — `ask()`'ın soru mesajı ağ hatasında bu aralıkla yeniden denenir. */
+    retry?: {
+        attempts: number;
+        waitMs: number;
+        sleep: (ms: number) => Promise<void>;
+    });
     send(message: string): Promise<void>;
     edit(messageId: string, text: string): Promise<void>;
     /**
@@ -20,4 +28,5 @@ export declare class TelegramNotifier implements Notifier {
      * tek-kullanımlık gereksinimi bu şekilde de UI'da yansır).
      */
     ask(question: string, options: NotifierOption[]): Promise<string>;
+    private sendWithRetry;
 }

@@ -11,10 +11,18 @@ export class TelegramNotifier {
     client;
     chatId;
     poller;
-    constructor(client, chatId, poller) {
+    retry;
+    constructor(client, chatId, poller, 
+    /** Faz 12.13 — `ask()`'ın soru mesajı ağ hatasında bu aralıkla yeniden denenir. */
+    retry = {
+        attempts: 20,
+        waitMs: 30_000,
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    }) {
         this.client = client;
         this.chatId = chatId;
         this.poller = poller;
+        this.retry = retry;
     }
     async send(message) {
         await this.client.sendMessage(this.chatId, message);
@@ -29,10 +37,25 @@ export class TelegramNotifier {
      * tek-kullanımlık gereksinimi bu şekilde de UI'da yansır).
      */
     async ask(question, options) {
-        const sent = await this.client.sendMessage(this.chatId, question, buildInlineKeyboard(options));
+        const sent = await this.sendWithRetry(question, options);
         const value = await this.poller.registerAsk(sent.message_id);
         const chosen = options.find((o) => o.value === value);
-        await this.client.editMessageText(this.chatId, sent.message_id, `${question}\n\n✓ Karar verildi: ${chosen?.label ?? value}`);
+        // Karar zaten alındı: "✓ Karar verildi" düzenlemesi kozmetik, ağ hatası kararı düşürmesin.
+        await this.client
+            .editMessageText(this.chatId, sent.message_id, `${question}\n\n✓ Karar verildi: ${chosen?.label ?? value}`)
+            .catch(() => { });
         return value;
+    }
+    async sendWithRetry(question, options) {
+        for (let attempt = 1;; attempt += 1) {
+            try {
+                return await this.client.sendMessage(this.chatId, question, buildInlineKeyboard(options));
+            }
+            catch (err) {
+                if (attempt >= this.retry.attempts)
+                    throw err;
+                await this.retry.sleep(this.retry.waitMs);
+            }
+        }
     }
 }

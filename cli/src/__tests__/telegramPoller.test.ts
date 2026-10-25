@@ -129,3 +129,29 @@ describe("TelegramPoller", () => {
     expect(secondCallBody.offset).toBe(6);
   });
 });
+
+describe("TelegramPoller — ağ hatası (Faz 12.13)", () => {
+  it("getUpdates ağ hatası fırlatmaz, onError'a gider; offset ilerlemez, sonraki turda güncelleme işlenir", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          result: [{ update_id: 5, message: { message_id: 1, chat: { id: 7 }, text: "/status" } }],
+        }),
+      });
+    const errors: unknown[] = [];
+    const poller = new TelegramPoller(new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch), 7, (e) =>
+      errors.push(e),
+    );
+    const commands: string[] = [];
+    poller.onCommandMessage((_c, command) => commands.push(command));
+
+    await expect(poller.pollOnce(0)).resolves.toBeUndefined();
+    expect(errors).toHaveLength(1);
+    await poller.pollOnce(0);
+    expect(commands).toEqual(["/status"]);
+    expect(JSON.parse(fetchFn.mock.calls[1][1].body).offset).toBe(0);
+  });
+});

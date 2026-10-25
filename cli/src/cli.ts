@@ -61,6 +61,7 @@ import { checkLock, removeLock, writeLock } from "./autopilot/processLock.js";
 import { TelegramClient } from "./autopilot/telegramClient.js";
 import { TelegramPoller } from "./autopilot/telegramPoller.js";
 import { TelegramNotifier } from "./autopilot/telegramNotifier.js";
+import { RetryingNotifier } from "./autopilot/notifier.js";
 import { resolveAssignment, resolveTeamRoute } from "./team/assign.js";
 import { escalateTeamNode } from "./team/teamEscalate.js";
 import { findDecision, markDecisionOverridden, readDecisions, recordDecision } from "./team/decisionLog.js";
@@ -1301,8 +1302,15 @@ export function buildCli(): Command {
           if (!secrets) throw new Error("Telegram secrets bulunamadı (~/.graphpilot/secrets.json)");
 
           const client = new TelegramClient(secrets.telegramBotToken);
-          const poller = new TelegramPoller(client, secrets.telegramChatId);
-          const notifier = new TelegramNotifier(client, secrets.telegramChatId, poller);
+          // Faz 12.13 — ağ hataları süreci düşürmez, log'a yazılır (telegramClient hataları
+          // token içermez — 12.9).
+          const logNetworkError = (err: unknown) =>
+            console.error(`[${new Date().toISOString()}] telegram: ${err instanceof Error ? err.message : String(err)}`);
+          const poller = new TelegramPoller(client, secrets.telegramChatId, logNetworkError);
+          const notifier = new RetryingNotifier(
+            new TelegramNotifier(client, secrets.telegramChatId, poller),
+            logNetworkError,
+          );
 
           const result = await runAutopilotLoop({
             graphRootDir: opts.graphRoot,

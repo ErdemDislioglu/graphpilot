@@ -10,11 +10,15 @@ import type { TelegramClient } from "./telegramClient.js";
 export declare class TelegramPoller {
     private readonly client;
     private readonly allowedChatId;
+    /** Faz 12.13 — `getUpdates` ağ hatası (ör. "fetch failed") buraya gider, döngüyü düşürmez. */
+    private readonly onError;
     private offset;
     private readonly pending;
     private readonly answeredCallbackIds;
     private onCommand?;
-    constructor(client: TelegramClient, allowedChatId: number | string);
+    constructor(client: TelegramClient, allowedChatId: number | string, 
+    /** Faz 12.13 — `getUpdates` ağ hatası (ör. "fetch failed") buraya gider, döngüyü düşürmez. */
+    onError?: (err: unknown) => void);
     /** `TelegramNotifier.ask()` tarafından çağrılır — ilgili mesajın buton cevabını bekleyen bir Promise döner. */
     registerAsk(messageId: number): Promise<string>;
     /** Roadmap 12.8 — `/status`, `/pause`, `/resume`, `/stop`, `/report` sabit komutları için. */

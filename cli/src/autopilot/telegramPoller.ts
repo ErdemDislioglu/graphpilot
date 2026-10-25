@@ -17,6 +17,8 @@ export class TelegramPoller {
   constructor(
     private readonly client: TelegramClient,
     private readonly allowedChatId: number | string,
+    /** Faz 12.13 — `getUpdates` ağ hatası (ör. "fetch failed") buraya gider, döngüyü düşürmez. */
+    private readonly onError: (err: unknown) => void = () => {},
   ) {}
 
   /** `TelegramNotifier.ask()` tarafından çağrılır — ilgili mesajın buton cevabını bekleyen bir Promise döner. */
@@ -33,7 +35,15 @@ export class TelegramPoller {
 
   /** Tek bir `getUpdates` turu. `timeoutSeconds: 0` → anında döner (test ve kısa-aralıklı tur için). */
   async pollOnce(timeoutSeconds = 0): Promise<void> {
-    const updates = await this.client.getUpdates(this.offset, timeoutSeconds);
+    let updates: TelegramUpdate[];
+    try {
+      updates = await this.client.getUpdates(this.offset, timeoutSeconds);
+    } catch (err) {
+      // Pilotta geçici bir ağ kesintisi otopilot sürecini öldürdü; offset ilerlemediği
+      // için kaçan güncellemeler bir sonraki turda yine gelir.
+      this.onError(err);
+      return;
+    }
     for (const update of updates) {
       this.offset = Math.max(this.offset, update.update_id + 1);
       this.handleUpdate(update);

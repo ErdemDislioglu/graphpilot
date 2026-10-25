@@ -72,3 +72,48 @@ describe("TelegramNotifier", () => {
     expect(editBody.text).toBe("Ne yapalım?\n\n✓ Karar verildi: Tekrar dene");
   });
 });
+
+describe("TelegramNotifier.ask — ağ hatası (Faz 12.13)", () => {
+  it("soru mesajı ağ hatasında yeniden denenir; son düzenleme hatası kararı düşürmez", async () => {
+    const fetchFn = vi.fn();
+    const client = new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch);
+    const poller = new TelegramPoller(client, 7);
+    const sleeps: number[] = [];
+    const notifier = new TelegramNotifier(client, 7, poller, {
+      attempts: 3,
+      waitMs: 10,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+    fetchFn
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce({ json: async () => ({ ok: true, result: { message_id: 9, chat: { id: 7 } } }) })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          ok: true,
+          result: [{ update_id: 1, callback_query: { id: "c1", data: "retry", message: { message_id: 9, chat: { id: 7 } } } }],
+        }),
+      })
+      .mockResolvedValueOnce({ json: async () => ({ ok: true, result: true }) }) // answerCallbackQuery
+      .mockRejectedValueOnce(new Error("fetch failed")); // editMessageText
+
+    const answer = notifier.ask("Ne yapalım?", [{ label: "Tekrar dene", value: "retry" }]);
+    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
+    await poller.pollOnce(0);
+    await expect(answer).resolves.toBe("retry");
+    expect(sleeps).toEqual([10]);
+  });
+
+  it("tüm denemeler tükenirse hatayı fırlatır", async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error("fetch failed"));
+    const client = new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch);
+    const notifier = new TelegramNotifier(client, 7, new TelegramPoller(client, 7), {
+      attempts: 2,
+      waitMs: 1,
+      sleep: async () => {},
+    });
+    await expect(notifier.ask("?", [])).rejects.toThrow();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+});

@@ -516,7 +516,11 @@ async function handleEpicCompletionIfAny(
   const epicNode = graph.nodesById.get(node.epicId);
   let pushNote = "";
   if (config.autopilot.git.push_on_epic_done) {
-    const pushed = pushCurrentBranch(opts.projectRoot ?? dirname(opts.graphRootDir), opts.git);
+    const projectRoot = opts.projectRoot ?? dirname(opts.graphRootDir);
+    // `git.commit: false` iken epic'in tüm işi burada tek commit'e iner; görev başına
+    // commit açıksa yalnız kalıntılar (graph metrikleri vb.) girer, yoksa commit atılmaz.
+    commitAll(projectRoot, `gp(${node.epicId}): ${String(epicNode?.frontmatter.summary ?? epicNode?.name ?? "")}`, opts.git);
+    const pushed = pushCurrentBranch(projectRoot, opts.git);
     if (opts.lang === "tr") pushNote = pushed ? " · ⬆️ dal push'landı" : " · ⚠️ push başarısız";
     else pushNote = pushed ? " · ⬆️ branch pushed" : " · ⚠️ push failed";
   }
