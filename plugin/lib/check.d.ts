@@ -51,5 +51,24 @@ export declare function runAcceptanceCheck(criteria: string, diff: string, opts?
     model?: string;
     spawner?: ClaudeSpawner;
 }): AcceptanceCheckResult;
+export type GitDiffResult = {
+    ok: true;
+    diff: string;
+} | {
+    ok: false;
+    reason: string;
+};
+/** `git` CLI'ını çağıran fonksiyon — testte enjekte edilir; stdout/stderr yakalanır, ekrana basılmaz. */
+export type GitRunner = (args: string[], cwd: string) => {
+    stdout: string;
+    status: number | null;
+};
+/**
+ * Faz 14 B1 — Katman 2'nin girdisi olan `git diff HEAD`'i okur. Eskiden doğrudan
+ * `execSync` çağrılıyordu: git deposu dışında git'in usage metni stderr'e akıyor,
+ * `--json` istense bile stdout'a hiçbir şey yazılmıyordu → skill sonucu "eksik yok"tan
+ * ayıramıyordu (ADR-008). Artık diff alınamazsa nedeni döner; çağıran `success:false` yazar.
+ */
+export declare function readGitDiff(projectRoot: string, runner?: GitRunner): GitDiffResult;
 /** `gp check <id>` komutunun üst düzey akışı: görevden kabul kriterlerini okur. */
 export declare function extractAcceptanceCriteria(task: GraphNode): string | null;

@@ -135,6 +135,37 @@ describe("cli — gp route", () => {
       expect(process.exitCode).toBe(1);
     });
   });
+
+  it("2026-10-25: team.enabled varsayılan TRUE — complexity:high bir görev routing tablosundan BAĞIMSIZ senior'a gider", async () => {
+    await withTempGraphAsync(
+      { "a.md": frontmatter({ ...TASK, complexity: "high" }), "config.yml": CONFIG_YML },
+      async (_graph, dir) => {
+        await run(["route", "E01-F01-T01", "-g", dir, "--json"]);
+        const parsed = JSON.parse(logs.join("\n"));
+        // CONFIG_YML'in routing tablosu ("when:{} → haiku") bunu ASLA senior'a göndermez
+        // — bu, ekip modunun GERÇEKTEN devrede olduğunu kanıtlıyor (routing tablosu
+        // bypass edildi).
+        expect(parsed).toEqual({ model: "opus", agent: "senior", review: false, budget: 8000, max_turns: 25 });
+      },
+    );
+  });
+
+  it("team.enabled:false ile eski config.routing tablosu kullanılır (geriye dönük uyum)", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": frontmatter({ ...TASK, complexity: "high" }),
+        "config.yml": CONFIG_YML + "team: { enabled: false }\n",
+      },
+      async (_graph, dir) => {
+        await run(["route", "E01-F01-T01", "-g", dir, "--json"]);
+        const parsed = JSON.parse(logs.join("\n"));
+        // routing tablosu complexity'ye bakmadan hep haiku diyor — team kapalıyken bu
+        // geçerli kalmalı (complexity:high bile olsa senior'a GİTMEMELİ).
+        expect(parsed.model).toBe("haiku");
+        expect(parsed.agent).toBe("coder");
+      },
+    );
+  });
 });
 
 describe("cli — gp set", () => {
@@ -156,6 +187,41 @@ describe("cli — gp set", () => {
         expect(logs.join("\n")).toContain("güncellendi");
         expect(existsSync(join(dir, "INDEX.md"))).toBe(true);
         expect(existsSync(join(dir, "E01-x", "_index.md"))).toBe(true);
+      },
+    );
+  });
+
+  it("Faz 14 B2: son task done olunca feature ve epic de done olur, gp status'ta pending kalmaz", async () => {
+    await withTempGraphAsync(
+      {
+        "E01-x/epic.md": frontmatter({
+          id: "E01",
+          kind: "epic",
+          name: "E01-x",
+          summary: "s",
+          status: "pending",
+          expanded: true,
+        }),
+        "E01-x/F01-a.md": frontmatter({
+          id: "E01-F01",
+          kind: "feature",
+          name: "F01-a",
+          summary: "s",
+          status: "pending",
+          expanded: true,
+        }),
+        "E01-x/tasks/F01-T01-a.md": frontmatter(TASK),
+      },
+      async (_graph, dir) => {
+        await run(["set", "E01-F01-T01", "status=done", "-g", dir, "--json"]);
+        expect(JSON.parse(logs.join("\n")).rollup).toEqual([
+          { id: "E01", from: "pending", to: "done" },
+          { id: "E01-F01", from: "pending", to: "done" },
+        ]);
+        logs = [];
+        await run(["status", "-g", dir, "--json"]);
+        const status = JSON.parse(logs.join("\n"));
+        expect(status.byStatus).toEqual({ done: 3 });
       },
     );
   });
@@ -209,6 +275,22 @@ describe("cli — gp checks", () => {
   });
 });
 
+describe("cli — gp check (Faz 14 B1)", () => {
+  it("git deposu dışında --json ile success:false basar ve exitCode=1 olur", async () => {
+    await withTempGraphAsync(
+      { "a.md": `${frontmatter(TASK)}\n## Kabul kriterleri\n- A çalışır\n`, "config.yml": CONFIG_YML },
+      async (_graph, dir) => {
+        await run(["check", "E01-F01-T01", "-g", dir, "-p", dir, "--json"]);
+        const parsed = JSON.parse(logs.join("\n"));
+        expect(parsed.success).toBe(false);
+        expect(parsed.results).toEqual([]);
+        expect(parsed.error).toContain("git deposu değil");
+        expect(process.exitCode).toBe(1);
+      },
+    );
+  });
+});
+
 describe("cli — gp escalate", () => {
   it("haiku'dan sonnet'e yükseltir", async () => {
     await withTempGraphAsync(
@@ -223,8 +305,16 @@ describe("cli — gp escalate", () => {
   });
 
   it("escalation tükenmişse exitCode=1", async () => {
+    // team.enabled AÇIKÇA false — bu test `config.routing`'in (Faz 6.5) escalation
+    // listesi TÜKENDİĞİNDE davranışını hedefliyor. Ekip modunun kendi zinciri (junior→
+    // junior(üst model)→senior) FARKLI/daha uzun bir merdiven, "sonnet" onda tükenmiş
+    // SAYILMAZ (senior/opus hâlâ var) — team.enabled varsayılan açık olduğu için bu
+    // testin niyetini korumak için açıkça kapatılıyor.
     await withTempGraphAsync(
-      { "a.md": frontmatter({ ...TASK, model: "sonnet" }), "config.yml": CONFIG_YML_2MODEL },
+      {
+        "a.md": frontmatter({ ...TASK, model: "sonnet" }),
+        "config.yml": CONFIG_YML_2MODEL + "team: { enabled: false }\n",
+      },
       async (_graph, dir) => {
         await run(["escalate", "E01-F01-T01", "-g", dir]);
         expect(process.exitCode).toBe(1);

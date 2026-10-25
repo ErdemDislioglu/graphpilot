@@ -15,7 +15,8 @@ import { runDoctor } from "./doctor.js";
 import { setBrief } from "./brief.js";
 import { applyFlagFixes, computeFlagFixes } from "./fixFlags.js";
 import { runChecks } from "./checks.js";
-import { extractAcceptanceCriteria, runAcceptanceCheck } from "./check.js";
+import { extractAcceptanceCriteria, readGitDiff, runAcceptanceCheck } from "./check.js";
+import { applyRollup } from "./rollup.js";
 import { escalateNode } from "./escalate.js";
 import { failNode } from "./fail.js";
 import { findExpandCandidates } from "./expandCandidates.js";
@@ -48,7 +49,7 @@ import { checkLock, removeLock, writeLock } from "./autopilot/processLock.js";
 import { TelegramClient } from "./autopilot/telegramClient.js";
 import { TelegramPoller } from "./autopilot/telegramPoller.js";
 import { TelegramNotifier } from "./autopilot/telegramNotifier.js";
-import { resolveAssignment } from "./team/assign.js";
+import { resolveAssignment, resolveTeamRoute } from "./team/assign.js";
 import { escalateTeamNode } from "./team/teamEscalate.js";
 import { findDecision, markDecisionOverridden, readDecisions, recordDecision } from "./team/decisionLog.js";
 import { computeMisTagRatio, summarizeMisTags } from "./team/tagging.js";
@@ -186,6 +187,8 @@ export function buildCli() {
             process.exitCode = 1;
     }));
     withGraphRoot(program.command("index").description("INDEX.md ve her epic'in _index.md'sini üret")).action(action((opts) => {
+        // Faz 14 B2: indeks üretilmeden önce feature/epic durumları task'lardan türetilir.
+        const rollup = applyRollup(loadGraph(opts));
         const graph = loadGraph(opts);
         writeFileAtomic(join(opts.graphRoot, "INDEX.md"), generateRootIndex(graph));
         const epicIds = [...graph.nodesById.values()]
@@ -196,7 +199,10 @@ export function buildCli() {
             const dir = epic.filePath.replace(/\/epic\.md$/, "");
             writeFileAtomic(join(dir, "_index.md"), generateEpicIndex(graph, epicId));
         }
-        output(opts, { epics: epicIds.length }, () => `✓ INDEX.md + ${epicIds.length} epic _index.md üretildi.`);
+        output(opts, { epics: epicIds.length, rollup }, () => [
+            `✓ INDEX.md + ${epicIds.length} epic _index.md üretildi.`,
+            ...rollup.map((c) => `  ↳ ${c.id}: ${c.from} → ${c.to}`),
+        ].join("\n"));
     }));
     withGraphRoot(program.command("next").description("Hazır (ready) task'ları ve paralel gruplarını listele"))
         .option("--limit <n>", "en fazla N task", (v) => Number(v))
@@ -286,6 +292,8 @@ export function buildCli() {
             process.exitCode = 1;
             return;
         }
+        // Faz 14 B2: task durumu değiştiyse feature/epic durumunu task'lardan türet.
+        const rollup = applyRollup(parseGraph(opts.graphRoot));
         // Roadmap 2.6: her değişiklikten sonra ilgili indeksi otomatik güncelle.
         const fresh = parseGraph(opts.graphRoot);
         writeFileAtomic(join(opts.graphRoot, "INDEX.md"), generateRootIndex(fresh));
@@ -297,7 +305,7 @@ export function buildCli() {
                 writeFileAtomic(join(dir, "_index.md"), generateEpicIndex(fresh, node.epicId));
             }
         }
-        output(opts, { ok: true }, () => `✓ ${id} güncellendi.`);
+        output(opts, { ok: true, rollup }, () => [`✓ ${id} güncellendi.`, ...rollup.map((c) => `  ↳ ${c.id}: ${c.from} → ${c.to}`)].join("\n"));
     }));
     withGraphRoot(program.command("route").description("Bir task için model/agent/budget çözümle"))
         .argument("<id>", "task ID'si")
@@ -307,7 +315,12 @@ export function buildCli() {
         const node = graph.nodesById.get(id);
         if (!node)
             throw new Error(`düğüm bulunamadı: ${id}`);
-        const result = resolveRoute(node, config);
+        // 2026-10-25, kullanıcı kararı — ekip modu varsayılan AÇIK: `/gp:run`'ın kendi
+        // SKILL.md'si DEĞİŞMEDİ (hâlâ `gp route <id>` çağırıyor), davranış farkı BURADA,
+        // tek bir yerde — `config.team.enabled` ise `resolveTeamRoute` (Faz 13), değilse
+        // eski `resolveRoute` (Faz 2/6, `config.routing` tablosu). Çıktı ŞEKLİ AYNI
+        // (`{model, agent, review, budget, max_turns}`) — hiçbir tüketici fark etmez.
+        const result = config.team.enabled ? resolveTeamRoute(node, config) : resolveRoute(node, config);
         output(opts, result, () => `model=${result.model} agent=${result.agent} review=${result.review} budget=${result.budget} max_turns=${result.max_turns}`);
     }));
     withGraphRoot(program
@@ -535,10 +548,10 @@ export function buildCli() {
         const criteria = extractAcceptanceCriteria(node);
         if (!criteria)
             throw new Error(`${id}: '## Kabul kriterleri' bölümü yok`);
-        const diff = execSync("git diff HEAD", { cwd: opts.projectRoot, encoding: "utf-8" });
-        const result = runAcceptanceCheck(criteria, diff, {
-            model: config.fix_loop.acceptance_check_model,
-        });
+        const diff = readGitDiff(opts.projectRoot);
+        const result = diff.ok
+            ? runAcceptanceCheck(criteria, diff.diff, { model: config.fix_loop.acceptance_check_model })
+            : { success: false, results: [], error: diff.reason };
         output(opts, result, () => !result.success
             ? `✗ kontrol başarısız: ${result.error}`
             : result.results.map((r) => `[${r.durum}] ${r.kriter} — ${r.not}`).join("\n"));
@@ -552,6 +565,16 @@ export function buildCli() {
         .action(action((id, opts) => {
         const graph = loadGraph(opts);
         const config = loadConfig(graph);
+        // 2026-10-25 — `gp route`'la AYNI gerekçe: ekip modu varsayılan açıkken bu komut
+        // `escalateTeamNode`'un zincirini (junior(haiku)→junior(sonnet)→senior) kullanır,
+        // `/gp:run`'ın SKILL.md'si DEĞİŞMEDİ (hâlâ sadece `escalated` alanına bakıyor).
+        if (config.team.enabled) {
+            const result = escalateTeamNode(graph, id, config);
+            output(opts, result, () => result.escalated ? `✓ ${result.fromRole}(${result.fromModel}) → ${result.toRole}(${result.toModel})` : `✗ ${result.reason}`);
+            if (!result.escalated)
+                process.exitCode = 1;
+            return;
+        }
         const result = escalateNode(graph, id, config);
         output(opts, result, () => result.escalated ? `✓ ${result.fromModel} → ${result.toModel}` : `✗ ${result.reason}`);
         if (!result.escalated)
@@ -680,6 +703,7 @@ export function buildCli() {
             });
             if (result.ok) {
                 setFrontmatter(loadGraph(opts), node.id, { status: "done" });
+                applyRollup(loadGraph(opts)); // Faz 14 B2
                 results.push({ id: node.id, ok: true });
             }
             else if (result.rateLimited) {

@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { extractAcceptanceCriteria, runAcceptanceCheck } from "../check.js";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { extractAcceptanceCriteria, readGitDiff, runAcceptanceCheck } from "../check.js";
 
 describe("runAcceptanceCheck — mock spawner", () => {
   it("başarılı structured_output'u ayrıştırır", () => {
@@ -71,5 +75,58 @@ describe("extractAcceptanceCriteria", () => {
       typeof extractAcceptanceCriteria
     >[0];
     expect(extractAcceptanceCriteria(task)).toBe("- A\n- B");
+  });
+});
+
+describe("readGitDiff — Faz 14 B1", () => {
+  const dirs: string[] = [];
+  const tempDir = () => {
+    const dir = mkdtempSync(join(tmpdir(), "gp-check-"));
+    dirs.push(dir);
+    return dir;
+  };
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync("git", args, { cwd, stdio: "pipe", encoding: "utf-8" });
+  const initRepo = (dir: string) => {
+    git(dir, "init", "-q");
+    git(dir, "config", "user.email", "test@example.com");
+    git(dir, "config", "user.name", "test");
+  };
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("git deposu dışında ok:false ve neden döner (eskiden boş stdout + usage metni)", () => {
+    const result = readGitDiff(tempDir());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("git deposu değil");
+  });
+
+  it("henüz commit'i olmayan depoda ok:false döner (git init sonrası)", () => {
+    const dir = tempDir();
+    initRepo(dir);
+    const result = readGitDiff(dir);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("HEAD yok");
+  });
+
+  it("commit'li depoda HEAD'e göre diff'i döner", () => {
+    const dir = tempDir();
+    initRepo(dir);
+    writeFileSync(join(dir, "a.txt"), "eski\n");
+    git(dir, "add", ".");
+    git(dir, "commit", "-q", "-m", "ilk");
+    writeFileSync(join(dir, "a.txt"), "yeni\n");
+    const result = readGitDiff(dir);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.diff).toContain("+yeni");
+  });
+
+  it("git diff başarısızsa ok:false döner (enjekte runner)", () => {
+    const result = readGitDiff(".", (args) =>
+      args[0] === "diff" ? { stdout: "", status: 128 } : { stdout: "true\n", status: 0 },
+    );
+    expect(result).toEqual({ ok: false, reason: "git diff HEAD başarısız (exit 128)" });
   });
 });

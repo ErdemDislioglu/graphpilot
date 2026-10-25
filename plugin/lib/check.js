@@ -77,6 +77,31 @@ export function runAcceptanceCheck(criteria, diff, opts = {}) {
         results: structuredOutput.results,
     };
 }
+const defaultGitRunner = (args, cwd) => {
+    const result = spawnSync("git", args, { cwd, encoding: "utf-8" });
+    return { stdout: result.stdout ?? "", status: result.error ? null : result.status };
+};
+/**
+ * Faz 14 B1 — Katman 2'nin girdisi olan `git diff HEAD`'i okur. Eskiden doğrudan
+ * `execSync` çağrılıyordu: git deposu dışında git'in usage metni stderr'e akıyor,
+ * `--json` istense bile stdout'a hiçbir şey yazılmıyordu → skill sonucu "eksik yok"tan
+ * ayıramıyordu (ADR-008). Artık diff alınamazsa nedeni döner; çağıran `success:false` yazar.
+ */
+export function readGitDiff(projectRoot, runner = defaultGitRunner) {
+    const inside = runner(["rev-parse", "--is-inside-work-tree"], projectRoot);
+    if (inside.status !== 0 || inside.stdout.trim() !== "true") {
+        return { ok: false, reason: `git deposu değil: ${projectRoot} — Katman 2 diff alamaz` };
+    }
+    const head = runner(["rev-parse", "--verify", "--quiet", "HEAD"], projectRoot);
+    if (head.status !== 0) {
+        return { ok: false, reason: "HEAD yok (henüz commit yapılmamış) — Katman 2 diff alamaz" };
+    }
+    const diff = runner(["diff", "HEAD"], projectRoot);
+    if (diff.status !== 0) {
+        return { ok: false, reason: `git diff HEAD başarısız (exit ${String(diff.status)})` };
+    }
+    return { ok: true, diff: diff.stdout };
+}
 /** `gp check <id>` komutunun üst düzey akışı: görevden kabul kriterlerini okur. */
 export function extractAcceptanceCriteria(task) {
     return extractSection(task.body, "Kabul kriterleri");

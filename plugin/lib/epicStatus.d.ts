@@ -19,5 +19,29 @@ export interface EpicDoneResult {
  * da sayan ilk sürüm, epic'in tüm task'ları bitse de hep `done:false` döndürüyordu
  * (`indexGen.ts`'in `formatProgress`'u da zaten aynı sebeple sadece `tasksOf` kullanıyordu —
  * tutarlı hale getirildi).
+ *
+ * Faz 14 B3 — sadece VAR OLAN task'ları saymak yetmez: E02-F02 henüz genişletilmemişken
+ * (`expanded: false`, hiç task'ı yok) E02'nin mevcut task'ları bitince `done:true` dönüyordu
+ * → repo-map erken tazeleniyordu. Epic'in kendisi ya da altındaki herhangi bir feature
+ * genişletilmemişse epic bitmiş sayılmaz.
  */
 export declare function computeEpicDone(graph: Graph, epicId: string): EpicDoneResult;
+export interface FeatureDoneResult {
+    featureId: string;
+    /** Feature'ın DOĞRUDAN çocuğu olan tüm task'lar `status: done` ise `true`. */
+    done: boolean;
+    total: number;
+    doneCount: number;
+}
+/**
+ * 2026-10-25 — gerçek bir test projesinde bulunan bug (`gp expand-candidates`): bir
+ * feature'ın başka bir feature'a `depends_on` ile bağlı olması durumunda, bağımlılığın
+ * "bitti" sayılması için o feature'ın KENDİ `status` alanının `done` olması
+ * bekleniyordu — ama HİÇBİR mekanizma bir feature'ın `status`'unu otomatik `done`'a
+ * çevirmiyor (sadece task'lar `gp set ... status=done` ile işaretlenir, `computeEpicDone`'ın
+ * KENDİ yorumunun da söylediği gibi). Sonuç: ikinci feature sonsuza dek "hazır değil"
+ * sayılıyor, graph tıkanıyor. `computeEpicDone`'la AYNI çözüm: feature'ın KENDİ
+ * `status`'una değil, DOĞRUDAN çocuğu olan task'ların (parent_of kenarı) hepsinin
+ * `done` olup olmadığına bakılır.
+ */
+export declare function computeFeatureDone(graph: Graph, featureId: string): FeatureDoneResult;
