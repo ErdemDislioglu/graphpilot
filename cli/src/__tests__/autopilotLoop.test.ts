@@ -90,8 +90,17 @@ describe("runAutopilotLoop — mutlu yol (12.3/12.5)", () => {
 
 describe("runAutopilotLoop — onay akışı (12.6)", () => {
   it("görev başarısız olur → needs_decision → 'retry' cevabıyla devam eder → biter", async () => {
+    // team.enabled AÇIKÇA false — bu test Faz 12.6'nın GENEL (ekip modundan bağımsız)
+    // başarısız-olunca-onay-akışı mekanizmasını hedefliyor. 2026-10-25'ten beri ekip
+    // modu varsayılan AÇIK olduğu için, aksi halde bu tek başarısızlık doğrudan
+    // `failNode`'a değil önce `escalateTeamNode`'a giderdi (kendi testi var, "ekip modu
+    // entegrasyonu" — bu testin kapsamı o DEĞİL).
     await withTempGraphAsync(
-      { "a.md": taskFrontmatter({}), "config.yml": CONFIG_YML, "coder.md": CODER_MD },
+      {
+        "a.md": taskFrontmatter({}),
+        "config.yml": CONFIG_YML + "team: { enabled: false }\n",
+        "coder.md": CODER_MD,
+      },
       async (_graph, dir) => {
         const notifier = new MockNotifier({ answers: ["retry"] });
         let calls = 0;

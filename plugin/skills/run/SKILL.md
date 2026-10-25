@@ -1,15 +1,18 @@
 ---
 description: >-
   Graph'ı arka planda, adım adım, doğru model ve izole bağlamla yürütür (MVP — Faz 6:
-  reviewer ve API testi yok, Faz 11'de eklenecek). Kullanıcı "/gp:run" yazdığında çalışır.
+  reviewer ve API testi yok, Faz 11'de eklenecek). `team.enabled` varsayılan AÇIK
+  olduğu için görevler otomatik olarak junior/senior/tester/docs rollerine gider (Faz
+  13) — `config.yml`'de `team.enabled: false` ile kapatılabilir. Kullanıcı "/gp:run"
+  yazdığında çalışır.
 argument-hint: "[--epic <id>] [--max-nodes N] [--dry-run]"
 ---
 
 # /gp:run
 
 > Bu skill ANA THREAD'de çalışır. **Kendin kod yazmazsın** — sadece `gp` çağırır ve
-> `coder`/`tester` subagent'larını başlatırsın. Bağlamını küçük tut: her iterasyonda
-> sadece `gp next`/`gp status` çıktısını oku, graph dosyalarını kendin açma.
+> `coder`/`senior`/`tester` subagent'larını başlatırsın. Bağlamını küçük tut: her
+> iterasyonda sadece `gp next`/`gp status` çıktısını oku, graph dosyalarını kendin açma.
 
 ## 0. Parametreler
 - `--epic <id>`: sadece o epic'in task'larını işle (gp next'in döndürdüğü listeyi
@@ -67,6 +70,15 @@ node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" route <id> --json       # { model, agent
 node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" context <id> --json     # .graph/_runtime/<id>.context.md yazar
 node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" set <id> status=running
 ```
+**Ekip modu (Faz 13, varsayılan açık):** `config.yml`'de `team.enabled: false` yazılı
+DEĞİLSE (varsayılan `true`), `gp route` KENDİSİ `config.team.*`'a göre yönlendirir —
+`agent` bazen `senior` döner (karmaşık/riskli görevler), model `config.team.junior/
+senior.*`'tan gelir, `config.routing` tablosuna HİÇ BAKILMAZ. Bu ayrım TAMAMEN `gp
+route`'un içinde — bu skill'in talimatı DEĞİŞMEZ, `route.agent`/`route.model`'i olduğu
+gibi kullan. Aynı otomatik ayrım `escalate <id>`'de de var (5. adım) — zincir
+"junior(haiku)→junior(sonnet)→senior" olur, bitmesi daha uzun sürer. Daha zengin ekip
+deneyimi (bulgu bildirme + yönetici karar politikası, Telegram/AskUserQuestion
+eskalasyonu) için kullanıcı doğrudan **`/gp:team`**'i çağırabilir.
 **Faz 7.6 — deterministik iskelet:** task'ın `type: scaffold` olup olmadığına bak (context
 paketindeki `## node` bölümünde görünür). Öyleyse ÖNCE:
 ```

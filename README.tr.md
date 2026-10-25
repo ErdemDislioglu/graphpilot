@@ -11,9 +11,8 @@ token** harcayarak.
 ```
 /gp:plan     → brief + epic'ler
 /gp:expand   → bir epic'i ihtiyaç anında feature/task'lara böl, flag'le
-/gp:run      → graph'ı yürüt: yönlendir → bağlamı izole et → yaz → kontrol et → düzelt → commit'le
-/gp:team     → aynısı, ama bir yönetici + junior/senior/tester/docs rolleri üzerinden
-gp autopilot → her iki döngüyü de insansız çalıştır, Telegram bildirim/onayıyla
+/gp:run      → graph'ı yürüt (yönetici + junior/senior/tester/docs rolleri, varsayılan açık)
+gp autopilot → insansız çalıştır, Telegram bildirim/onayıyla (opsiyonel)
 ```
 
 ## Neden
@@ -62,16 +61,19 @@ kapatılabilir token-optimizasyon teknikleri ve kesinti sonrası devam dayanıkl
 bitti — buna ek olarak, yol haritasında paketleme/yayından ÖNCEYE alınan iki yeni
 özellik de tamamlandı:
 
-- **Otopilot** — Telegram bildirimleri, butonlu onaylar, kullanım limiti dolduğunda
-  otomatik devam ve süreç yönetimiyle (`gp autopilot start|stop|status|logs`)
-  insansız/arka planda yürütme.
-- **Ekip modu** (`/gp:team`) — görevleri karmaşıklık/risk tag'lerine göre
-  junior/senior/tester/docs rollerine dağıtan, başarısızlıkları zincirde yukarı
-  taşıyan (junior → daha güçlü modelle junior → senior) ve güvenlik/mimari/kapsam
-  kararlarında — Telegram üzerinden ya da oturum içinde — onay isteyen bir yönetici;
-  her karar kayıtlı ve geri çevrilebilir.
+- **Ekip modu** — *varsayılan açık*, kurulum gerektirmez. Görevleri karmaşıklık/risk
+  tag'lerine göre junior/senior/tester/docs rollerine dağıtan, başarısızlıkları
+  zincirde yukarı taşıyan (junior → daha güçlü modelle junior → senior) ve
+  güvenlik/mimari/kapsam kararlarında — Telegram üzerinden ya da oturum içinde — onay
+  isteyen bir yönetici; her karar kayıtlı ve geri çevrilebilir. Her görevin tek bir
+  modele gitmesini istersen `config.yml`'de `team.enabled: false` ile kapatabilirsin.
+- **Otopilot** — *opsiyonel*, gerçek bir Telegram botu gerektirdiği için. Telegram
+  bildirimleri, butonlu onaylar, kullanım limiti dolduğunda otomatik devam ve süreç
+  yönetimiyle (`gp autopilot start|stop|status|logs`) insansız/arka planda yürütme.
+  `/gp:init`, `.graph/`'ı kurduktan hemen sonra bunu bağlamak isteyip istemediğini bir
+  kez sorar — hayır dersen hiçbir iz kalmadan atlanır.
 
-578 test geçiyor; CLI tip kontrolünden ve lint'ten temiz çıkıyor, ve bu testlerin
+580 test geçiyor; CLI tip kontrolünden ve lint'ten temiz çıkıyor, ve bu testlerin
 HİÇBİRİ gerçek bir LLM API çağrısı harcamadı — tamamen deterministik kod üzerinde
 çalışıyor. Otopilot/ekip modunun gerçek bir Telegram botuyla uçtan uca canlı denemesi
 henüz yapılmadı, bu açıkça not düşüldü.
@@ -97,14 +99,17 @@ GraphPilot bir Claude Code plugin'i olarak dağıtılır. Claude Code içinden:
 Sonra, projenizin içinde:
 
 ```
-/gp:init    # .graph/ iskeletini kurar (brief.md + config.yml)
+/gp:init    # .graph/ iskeletini kurar (brief.md + config.yml) — Telegram bildirimi isteyip istemediğini bir kez sorar
 /gp:plan    # bir ürün brief'ini brief.md + epic'lere dönüştürür
 /gp:expand  # bir epic'i ihtiyaç anında flag'lenmiş feature/task'lara açar
-/gp:run     # graph'ı uçtan uca yürütür
-/gp:team    # aynısı, bir yönetici + junior/senior/tester/docs rolleri üzerinden (config.yml'de team.enabled: true gerekir)
+/gp:run     # graph'ı uçtan uca yürütür — ekip modu (junior/senior/tester/docs) varsayılan açık
+/gp:team    # aynısı, açıkça — config.yml'den bağımsız her zaman tam yönetici deneyimi istersen
 ```
 
-Oturumda kalmak yerine Telegram bildirimleriyle insansız çalıştırmak için:
+`/gp:init`, `.graph/`'ı kurduktan hemen sonra otopilot için Telegram bildirimi isteyip
+istemediğini sorar. Evet dersen `@BotFather` ile bir bot oluşturma adımlarında sana
+yol gösterir ve chat'ini bağlar; hayır dersen (ya da atlarsan) istediğin zaman sonra
+kurabilirsin:
 
 ```
 gp autopilot setup --token <bot-token'ınız>   # botu doğrular, chat'inizi bağlar
@@ -126,7 +131,7 @@ bench/    Benchmark senaryoları ve sonuçları (token-optimizasyon ablasyon tab
 cd cli
 nvm use          # Node >=22 gerekli
 npm install
-npm test          # Vitest — 578 test
+npm test          # Vitest — 580 test
 npm run lint
 npm run build      # dist/ üretir, scripts/sync-cli-to-plugin.sh ile plugin/lib/'e senkronlanır
 ```

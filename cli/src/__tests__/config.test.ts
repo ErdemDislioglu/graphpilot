@@ -154,10 +154,10 @@ describe("ConfigSchema — autopilot (Faz 12.2 eklemesi)", () => {
 });
 
 describe("ConfigSchema — team (Faz 13.2 eklemesi)", () => {
-  it("hiç verilmezse roadmap 13.2'nin belgelenen varsayılanlarıyla dolar", () => {
+  it("hiç verilmezse roadmap 13.2'nin belgelenen varsayılanlarıyla dolar (2026-10-25: enabled varsayılan TRUE — ekip modu bu plugin'in varsayılan çalışma şekli)", () => {
     const result = ConfigSchema.parse(MINIMAL);
     expect(result.team).toEqual({
-      enabled: false,
+      enabled: true,
       manager: {
         model: "sonnet",
         consult_senior_for: ["architecture", "data_model", "security"],

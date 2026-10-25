@@ -11,9 +11,8 @@ by hand.
 ```
 /gp:plan     → brief + epics
 /gp:expand   → lazily expand an epic into features/tasks, flag them
-/gp:run      → execute the graph: route → isolate context → write → verify → fix → commit
-/gp:team     → same, but routed through a manager + junior/senior/tester/docs roles
-gp autopilot → run either loop unattended, with Telegram notifications and approvals
+/gp:run      → execute the graph (manager + junior/senior/tester/docs roles, on by default)
+gp autopilot → run it unattended, with Telegram notifications and approvals (opt-in)
 ```
 
 ## Why
@@ -60,16 +59,20 @@ intake/planning, lazy expansion, the execution engine, independently-toggleable
 token-optimization techniques, and interrupt/resume resilience) is done, plus two
 later-roadmap features that were pulled ahead of packaging and release:
 
-- **Autopilot** — unattended headless execution with Telegram notifications,
-  button-based approvals, automatic resume after hitting a usage limit, and process
-  management (`gp autopilot start|stop|status|logs`).
-- **Team mode** (`/gp:team`) — a manager that routes tasks to junior/senior/tester/docs
-  roles by complexity and risk tags, escalates failures up the chain (junior → junior
-  on a stronger model → senior), and asks for approval — via Telegram or in-session —
-  on security, architecture, and scope decisions, with every decision logged and
-  revertible.
+- **Team mode** — *on by default*, no setup needed. A manager routes tasks to
+  junior/senior/tester/docs roles by complexity and risk tags, escalates failures up
+  the chain (junior → junior on a stronger model → senior), and asks for approval —
+  via Telegram or in-session — on security, architecture, and scope decisions, with
+  every decision logged and revertible. Turn it off per-project with `team.enabled:
+  false` in `config.yml` if you'd rather have every task go to one model.
+- **Autopilot** — *opt-in*, since it needs a real Telegram bot. Unattended headless
+  execution with Telegram notifications, button-based approvals, automatic resume
+  after hitting a usage limit, and process management
+  (`gp autopilot start|stop|status|logs`). `/gp:init` asks once, right after it
+  scaffolds `.graph/`, whether you want to wire this up — say no and it's skipped
+  entirely with no trace left anywhere in the project.
 
-578 tests pass; the CLI type-checks and lints clean, and every one of those tests runs
+580 tests pass; the CLI type-checks and lints clean, and every one of those tests runs
 against deterministic code — none of this work spent a real LLM API call. A live,
 end-to-end trial of autopilot/team mode against a real Telegram bot hasn't been run yet
 and is noted as such.
@@ -95,14 +98,17 @@ GraphPilot ships as a Claude Code plugin. From inside Claude Code:
 Then, in your project:
 
 ```
-/gp:init    # scaffolds .graph/ (brief.md + config.yml)
+/gp:init    # scaffolds .graph/ (brief.md + config.yml) — asks once if you want Telegram notifications
 /gp:plan    # turns a product brief into brief.md + epics
 /gp:expand  # expands an epic into flagged features/tasks on demand
-/gp:run     # executes the graph end to end
-/gp:team    # same, through a manager + junior/senior/tester/docs roles (needs team.enabled: true)
+/gp:run     # executes the graph end to end — team mode (junior/senior/tester/docs) is on by default
+/gp:team    # same, explicitly — useful if you want the full manager experience regardless of config.yml
 ```
 
-To run unattended with Telegram notifications instead of staying in the session:
+`/gp:init` will ask, right after it scaffolds `.graph/`, whether you want Telegram
+notifications for autopilot mode. Say yes and it walks you through creating a bot with
+`@BotFather` and links your chat; say no (or skip it) and you can set it up any time
+later:
 
 ```
 gp autopilot setup --token <your-bot-token>   # validates the bot, links your chat
@@ -124,7 +130,7 @@ bench/    Benchmark scenarios and results (incl. the token-optimization ablation
 cd cli
 nvm use          # Node >=22 required
 npm install
-npm test          # Vitest — 578 tests
+npm test          # Vitest — 580 tests
 npm run lint
 npm run build      # emits dist/, synced into plugin/lib/ via scripts/sync-cli-to-plugin.sh
 ```

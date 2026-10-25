@@ -189,7 +189,11 @@ const TeamDocsSchema = z
     .strict();
 const TeamSchema = z
     .object({
-    enabled: z.boolean().default(false),
+    // 2026-10-25, kullanıcı kararı: ekip modu bu plugin'in VARSAYILAN çalışma şekli —
+    // `autopilot`'un aksine (gerçek bir Telegram bot token'ı gerektirir, opsiyonel
+    // kalır), ekip modu dış bir bağımlılık istemiyor; kapatmak isteyen kullanıcı
+    // `config.yml`'de `team: { enabled: false }` yazar.
+    enabled: z.boolean().default(true),
     manager: TeamManagerSchema.default({
         model: "sonnet",
         consult_senior_for: ["architecture", "data_model", "security"],
@@ -249,7 +253,7 @@ export const ConfigSchema = z
         language: "tr",
     }),
     team: TeamSchema.default({
-        enabled: false,
+        enabled: true,
         manager: { model: "sonnet", consult_senior_for: ["architecture", "data_model", "security"], autonomy: "balanced" },
         junior: { low: "haiku", med: "sonnet", max_parallel: 2 },
         senior: { model: "opus", max_parallel: 1 },
