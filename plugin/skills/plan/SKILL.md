@@ -25,8 +25,15 @@ MOD: SORU
 İstek: <kullanıcının yazdığı istek>
 Repomap özeti: <1. adımın çıktısı, veya "boş proje">
 ```
-Planner'ın döndürdüğü `questions` dizisi **boşsa** adım 3'e geç, hiçbir şey sorma.
-**Boş değilse**, `AskUserQuestion` aracını SEN çağır — planner'ın ürettiği
+**Küçük iş uyarısı (Faz 14 O19):** `node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" config --key efficiency --json`.
+`small_project_warn_tasks > 0` ve planner'ın `estimatedTasks`'ı bundan küçük ya da eşitse,
+sorularla AYNI `AskUserQuestion` çağrısına şu soruyu ekle: "Bu iş ~`<estimatedTasks>`
+görevlik görünüyor; plugin'siz Claude Code daha ucuz olabilir. Yine de graph kurayım mı?"
+(seçenekler: "Graph kur (Önerilen değil)" / "Vazgeç, doğrudan Claude Code ile yap").
+Vazgeçilirse dur. Bu yalnız bir uyarıdır — akış değişmez, karar kullanıcının.
+
+Planner'ın döndürdüğü `questions` dizisi **boşsa** (ve uyarı gerekmiyorsa) adım 3'e geç,
+hiçbir şey sorma. **Boş değilse**, `AskUserQuestion` aracını SEN çağır — planner'ın ürettiği
 `question`/`options`/`recommended` alanlarını olduğu gibi kullan, kendi soru üretme.
 Kullanıcı "sen karar ver" derse veya bir soruyu atlarsa, o alan için `recommended`
 değerini kullanacağını not et (adım 3'e bunu "atlandı" olarak aktar).
@@ -38,10 +45,10 @@ MOD: ÜRETİM
 Repomap özeti: <1. adım>
 Cevaplar: <2. adımın cevapları, veya "kullanıcı atladı, varsayımları kullan">
 ```
-Planner bu çağrı sırasında `gp brief` ve `gp new epic --depends-on ...` komutlarını
+Planner bu çağrı sırasında `gp brief` ve `gp apply` (epic'ler, tek plan) komutlarını
 **kendisi** çalıştırır (brief.md ve epic.md'ler bu noktada zaten diskte yazılmıştır —
 ama kullanıcı henüz ONAYLAMADI, bir sonraki adımda onay alınana kadar bu "taslak"
-sayılır; onaylanmazsa adım 5'te düzeltilir/`gp new` ile yeniden yapılır).
+sayılır; onaylanmazsa adım 5'te düzeltilir).
 
 ### 4. Özet göster
 Planner'ın döndürdüğü JSON'dan kullanıcıya göster:
@@ -65,8 +72,8 @@ node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" validate --json
 node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" index --json
 ```
 `validate` hata döndürürse düzelt (planner'ı tekrar çağır), `issues` boşalana kadar.
-Kullanıcıya kısaca bitir: "`N` epic oluşturuldu, graph geçerli. `/gp:expand` ile
-devam edebilirsin (Faz 5)."
+Kullanıcıya kısaca bitir: "`N` epic oluşturuldu, graph geçerli. `/gp:run` ile
+başlatabilirsin (genişletmeyi kendisi yapar)."
 
 ## Planlama maliyeti
 Bu oturumun token kullanımını not et (Faz 8'in `_metrics/plan.jsonl` altyapısı henüz

@@ -16,6 +16,7 @@ Claude Code plugin'i + TypeScript CLI (`gp`). Spesifikasyon: `docs/SPEC.md`. Yol
 - Test: `npm test`
 - Lint: `npm run lint`
 - CLI'ı yerelde çalıştır: `npm run gp -- <komut>`
+- Push öncesi (plugin/ değiştiyse sürüm artmış mı): `scripts/check-plugin-version.sh`
 
 ## Klasörler
 - `cli/` TypeScript CLI kaynak kodu

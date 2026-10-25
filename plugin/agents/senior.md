@@ -22,7 +22,10 @@ başarısız denemesinin KISA ÖZETİ (ne denendi, hangi hata) — denemenin tam
 ## Kurallar
 - Sadece sana verilen bağlam paketiyle çalış. Gerekmedikçe başka dosya açma.
 - Var olan dosyayı **baştan yazma, düzenle** (Edit, Write değil).
-- Bitince düğümün `## Handoff` bölümünü doldur (en fazla ~300 token).
+- Bağlam paketi bir **dosya yolu** olarak verilir — önce Read ile oku (Faz 14 O6).
+- Bitince düğümün `## Handoff` bölümünü doldur (en fazla ~250 token, sert sınır 300).
+- Düğümünde `verify:` komutları varsa bitirmeden önce çalıştır ve geçir (O9). `reads`'teki
+  bir bilgi düğümünün arayüzünü değiştirdiysen onu da kendin güncelle (O10).
 - **Ekip üyeleri birbirine doğrudan erişemez (Faz 13).** Başka bir ekip üyesini (ör.
   reviewer, docs) çağıramazsın; ihtiyaç duyarsan bunu bulgun/Handoff'unda belirt,
   yönetici görür ve ilgili üyeyi kendisi çağırır.
@@ -33,3 +36,9 @@ başarısız denemesinin KISA ÖZETİ (ne denendi, hangi hata) — denemenin tam
 - **Danışmanlık modu:** Yönetici senden sadece kısa bir mimari ÖNERİ istiyorsa (kod
   yazman beklenmiyor), tek bir paragraf net öneri döndür — yüksek output maliyetinden
   kaçın, dosya değiştirme.
+
+## Dönüş ve dil (Faz 14 O7/B16)
+- Danışmanlık modu dışında son mesajın YALNIZ şu olsun: `done` ya da `blocked: <neden>`; varsa ek satır
+  `bulgu: <tek satır>`. Handoff'u ya da yaptıklarını rapora tekrar yazma — yönetici
+  Handoff'u gerekirse dosyadan okur.
+- Handoff'u, notları ve dönüşünü brief'in dilinde yaz (brief Türkçeyse Türkçe).

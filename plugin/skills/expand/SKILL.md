@@ -22,11 +22,13 @@ argument-hint: "[epic-id veya feature-id, opsiyonel]"
 ile onay al ("E01'i feature'lara aç?" / evet-hayır). `false` (varsayılan) ise direkt geç.
 
 ## 3. Planner'ı çağır
-- Hedef bir **epic** ise → `planner`'ı `MOD: GENİŞLETME-FEATURE` ile çağır. Girdi:
-  epic ID + epic.md içeriği + brief + kardeş epic'lerin bilgi düğümü özetleri (varsa).
-- Hedef bir **feature** ise → `planner`'ı `MOD: GENİŞLETME-TASK` ile çağır. Girdi:
-  feature ID + feature.md + epic bilgi düğümlerinin özetleri + o epic'in knowledge/
-  klasöründeki iskelet dosyaların adları.
+`node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" config --key efficiency --json` → Agent çağrısında
+`model: <expansion_model>` (Faz 14 O14 — genişletme sık çalışır; `opus` yazılırsa eski davranış).
+Prompt'a mod satırı + hedef ID + `efficiency` değerlerini koy; dosya içeriklerini
+yapıştırma — planner brief'i, hedef düğümü ve bilgi düğümü özetlerini `.graph/`'tan kendi okur.
+- Hedef bir **epic** ise → `MOD: GENİŞLETME-FEATURE` (küçük epic'te görevleri de açar — O4).
+- Hedef bir **feature** ise → `MOD: GENİŞLETME-TASK`.
+Planner düğümleri `gp apply` ile yazar.
 
 ## 4. Sonuç tablosu göster
 Planner'ın döndürdüğü JSON'dan: yeni düğümler (id, summary), flag'ler varsa
@@ -41,5 +43,5 @@ kararları — SPEC §5.5).
 
 ## 6. Bitir
 `node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" index --json`. Kullanıcıya: "`N` yeni düğüm
-oluşturuldu. `/gp:run` ile çalıştırabilirsin (Faz 6)." `/gp:run` henüz hazır değilse
-(bu plugin sürümünde placeholder) bunu da belirt.
+oluşturuldu. `/gp:run` ile çalıştırabilirsin." (`/gp:run` genişletmeyi kendisi de yapar —
+bu skill yalnız elle genişletme içindir.)
