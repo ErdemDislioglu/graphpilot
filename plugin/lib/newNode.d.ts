@@ -1,3 +1,4 @@
+import type { TaskTemplateExtras } from "./templates.js";
 import type { Graph } from "./graph/types.js";
 export interface NewNodeOptions {
     kind: "epic" | "feature" | "task" | "knowledge";
@@ -22,6 +23,13 @@ export interface NewNodeOptions {
     reads?: string[];
     /** Faz 5 eklemesi — sadece `kind: task`. Glob desenleri, varlık kontrolü YAPILMAZ. */
     touches?: string[];
+    /** Faz 14 B7b — sadece `kind: task`: type/complexity/risk/context_size/tags/verify. */
+    task?: TaskTemplateExtras;
+    /**
+     * Faz 14 O3/B4 — gövde bölümleri (`{ "Görev": "...", "Kabul kriterleri": "..." }`).
+     * Şablondaki `(TODO)` yerine yazılır; şablonda olmayan bölüm sona eklenir.
+     */
+    body?: Record<string, string>;
 }
 export interface NewNodeResult {
     id: string;
@@ -33,3 +41,4 @@ export interface NewNodeResult {
  * kullanılmaz (`counters.ts`).
  */
 export declare function createNewNode(graph: Graph, opts: NewNodeOptions): NewNodeResult;
+export declare function fillBody(content: string, body: Record<string, string>): string;

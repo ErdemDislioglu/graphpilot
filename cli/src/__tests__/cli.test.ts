@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildCli } from "../cli.js";
@@ -288,6 +288,37 @@ describe("cli — gp check (Faz 14 B1)", () => {
         expect(process.exitCode).toBe(1);
       },
     );
+  });
+});
+
+describe("cli — gp apply / gp verify (Faz 14 O3/O9)", () => {
+  it("apply planı yazar, indeksi üretir; verify task'ın komutlarını çalıştırır", async () => {
+    await withTempGraphAsync({ "config.yml": CONFIG_YML }, async (_graph, dir) => {
+      const planPath = join(dir, "plan.json");
+      writeFileSync(
+        planPath,
+        JSON.stringify({
+          nodes: [
+            { ref: "e", kind: "epic", slug: "x", summary: "s" },
+            { ref: "f", kind: "feature", slug: "y", parent: "e", summary: "s" },
+            { kind: "task", slug: "z", parent: "f", summary: "s", verify: ["node -e \"process.exit(0)\""] },
+          ],
+          expanded: ["e", "f"],
+        }),
+      );
+      await run(["apply", planPath, "-g", dir, "--json"]);
+      expect(JSON.parse(logs.join("\n")).created.map((n: { id: string }) => n.id)).toEqual([
+        "E01",
+        "E01-F01",
+        "E01-F01-T01",
+      ]);
+      expect(existsSync(join(dir, "INDEX.md"))).toBe(true);
+
+      logs = [];
+      await run(["verify", "E01-F01-T01", "-g", dir, "-p", dir, "--json"]);
+      expect(JSON.parse(logs.join("\n"))).toMatchObject({ ok: true, verified: true });
+      expect(process.exitCode).toBeUndefined();
+    });
   });
 });
 

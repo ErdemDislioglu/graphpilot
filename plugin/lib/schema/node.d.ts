@@ -113,6 +113,7 @@ export declare const NodeFrontmatterSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         senior: "senior";
         junior: "junior";
     }>>;
+    verify: z.ZodDefault<z.ZodArray<z.ZodString>>;
 }, z.core.$strict>, z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodLiteral<"knowledge">;

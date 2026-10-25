@@ -33,5 +33,9 @@ export const TaskFrontmatterSchema = z
     tags: z.array(z.string().min(1)).default([]),
     // Faz 13.3 eklemesi — `auto` ise tag tablosundan çözülür, değilse elle ezer.
     assignee: AssigneeSchema.default("auto"),
+    // Faz 14 O9 — görevin çalıştırılabilir doğrulama komutları (ör. "node --test test/x.test.js").
+    // `gp verify <id>` hepsini proje kökünde çalıştırır; Katman 1'i deterministik yapar ve
+    // git'siz modda Katman 2'nin (diff'e dayalı `gp check`) yerini tutar (B11).
+    verify: z.array(z.string().min(1)).default([]),
 })
     .strict();

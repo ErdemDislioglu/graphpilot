@@ -1,5 +1,6 @@
 import { ConfigSchema } from "./schema/index.js";
 import { resolveRoute } from "./route.js";
+import { resolveTeamRoute } from "./team/assign.js";
 import { tasksOf } from "./graph/types.js";
 const BANNER = "<!-- OTOMATİK ÜRETİLİR — ELLE DÜZENLEME (gp index) -->";
 /**
@@ -54,7 +55,8 @@ export function generateEpicIndex(graph, epicId) {
 }
 function safeRouteModel(node, config) {
     try {
-        return resolveRoute(node, config).model;
+        // Faz 14 B10 — `gp route` ile aynı kaynak: ekip modunda `config.routing` değil team tablosu.
+        return (config.team.enabled ? resolveTeamRoute(node, config) : resolveRoute(node, config)).model;
     }
     catch {
         return "?";

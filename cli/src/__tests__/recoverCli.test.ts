@@ -86,9 +86,9 @@ describe("gp recover — gerçek git", () => {
         ]);
         expect(result.applied).toEqual([{ nodeId: "E01-F01-T01", action: "geri alındı → pending" }]);
         expect(readFileSync(join(dir, "src", "a.js"), "utf-8")).toBe("eski içerik\n");
-        // setFrontmatter yazarken gray-matter/js-yaml düz string'leri tırnaksız yazar
-        // (test fixture'ının kendi JSON.stringify'lı yazımından farklı) — gerçek davranış.
-        expect(readFileSync(join(graphDir, "a.md"), "utf-8")).toMatch(/status: pending\b/);
+        // Faz 14 B7d: setFrontmatter satırın kendi stilini korur — fixture JSON (tırnaklı)
+        // yazdığı için yeni değer de tırnaklı kalır (eskiden tüm frontmatter yeniden biçimleniyordu).
+        expect(readFileSync(join(graphDir, "a.md"), "utf-8")).toMatch(/status: "pending"/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

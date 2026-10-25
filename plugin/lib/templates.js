@@ -27,22 +27,24 @@ export function renderFeatureTemplate(id, name, summary, dependsOn = []) {
         draft: false,
     }) + "\n## Amaç\n\n(TODO)\n\n## Kabul kriterleri\n\n(TODO)\n");
 }
-export function renderTaskTemplate(id, name, summary, dependsOn = [], reads = [], touches = []) {
+export function renderTaskTemplate(id, name, summary, dependsOn = [], reads = [], touches = [], extra = {}) {
     return (fm({
         id,
         kind: "task",
         name,
         level: 3,
         summary,
-        type: "feature",
-        complexity: "med",
-        risk: "low",
-        context_size: "small",
+        type: extra.type ?? "feature",
+        complexity: extra.complexity ?? "med",
+        risk: extra.risk ?? "low",
+        context_size: extra.context_size ?? "small",
         model: "auto",
         agent: "auto",
         depends_on: dependsOn,
         reads: reads.map((n) => `[[${n}]]`),
         touches,
+        ...(extra.tags && extra.tags.length > 0 ? { tags: extra.tags } : {}),
+        ...(extra.verify && extra.verify.length > 0 ? { verify: extra.verify } : {}),
         context_budget: 8000,
         status: "pending",
         attempts: 0,

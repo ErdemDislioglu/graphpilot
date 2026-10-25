@@ -76,12 +76,15 @@ describe("buildRepoMap", () => {
     );
   });
 
-  it("sembolsüz dosya çıktıya eklenmez", () => {
-    withTempProject({ "src/empty.ts": "// sadece yorum\n" }, (dir) => {
-      const { body, fileCount } = buildRepoMap(dir);
-      expect(body).not.toContain("empty.ts");
-      expect(fileCount).toBe(0);
-    });
+  it("Faz 14 B9: sembolsüz dosya yalnız yol olarak listelenir (ör. test dosyaları)", () => {
+    withTempProject(
+      { "src/empty.ts": "// sadece yorum\n", "src/a.ts": "export function a() {}" },
+      (dir) => {
+        const { body, fileCount } = buildRepoMap(dir);
+        expect(body).toBe("src/a.ts: a\nsrc/empty.ts\n");
+        expect(fileCount).toBe(2);
+      },
+    );
   });
 
   it("çıktı dosya adına göre deterministik sıralı", () => {

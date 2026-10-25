@@ -178,3 +178,37 @@ describe("writeContextFile", () => {
     );
   });
 });
+
+describe("buildContext — Faz 14 B8: repo-map her pakete girer", () => {
+  const REPO_MAP =
+    '---\nid: repo-map\nkind: knowledge\nname: repo-map\nsummary: "harita"\nscope: shared\nupdated_by: []\nsource_files: []\n---\n## Arayüz\nsrc/a.js: a\n';
+
+  it("optimizations.repo_map açıkken reads'te olmasa da read:repo-map eklenir (bir kez)", () => {
+    withTempGraph(
+      {
+        "_shared/knowledge/repo-map.md": REPO_MAP,
+        "a.md": frontmatter(TASK({ id: "E01-F01-T01", name: "a" })),
+        "b.md": frontmatter(TASK({ id: "E01-F01-T02", name: "b", reads: ["[[repo-map]]"] })),
+      },
+      (graph) => {
+        const a = buildContext(graph, "E01-F01-T01", MINIMAL_CONFIG).markdown;
+        expect(a).toContain("## read:repo-map\n\n## Arayüz\nsrc/a.js: a");
+        const b = buildContext(graph, "E01-F01-T02", MINIMAL_CONFIG).markdown;
+        expect(b.split("## read:repo-map").length - 1).toBe(1);
+      },
+    );
+  });
+
+  it("optimizations.repo_map kapalıysa eklenmez", () => {
+    withTempGraph(
+      {
+        "_shared/knowledge/repo-map.md": REPO_MAP,
+        "a.md": frontmatter(TASK({ id: "E01-F01-T01", name: "a" })),
+      },
+      (graph) => {
+        const config = { ...MINIMAL_CONFIG, optimizations: { ...MINIMAL_CONFIG.optimizations, repo_map: false } };
+        expect(buildContext(graph, "E01-F01-T01", config).markdown).not.toContain("read:repo-map");
+      },
+    );
+  });
+});

@@ -170,12 +170,26 @@ export function validateGraph(graph) {
                 message: `feature ${tasks.length} görev içeriyor (sınır ${MAX_TASKS_PER_FEATURE}) — aşırı bölünmüş olabilir`,
             });
         }
-        const smallSiblings = tasks.filter((t) => {
+        const small = tasks.filter((t) => {
             const touches = Array.isArray(t.frontmatter.touches) ? t.frontmatter.touches : [];
             return (t.frontmatter.complexity === "low" &&
                 t.frontmatter.type !== "test" &&
                 touches.length <= SMALL_TASK_MAX_TOUCHES);
         });
+        // Faz 14 B14c — birbirine `depends_on` ile bağlı görevler aynı batch'e giremez
+        // (`gp next`'in `batches`'ı da onları boş bırakır); uyarı da onları önermesin.
+        const smallIds = new Set(small.map((t) => t.id));
+        const linked = new Set();
+        for (const t of small) {
+            const deps = Array.isArray(t.frontmatter.depends_on) ? t.frontmatter.depends_on : [];
+            for (const d of deps) {
+                if (typeof d === "string" && smallIds.has(d)) {
+                    linked.add(t.id);
+                    linked.add(d);
+                }
+            }
+        }
+        const smallSiblings = small.filter((t) => !linked.has(t.id));
         if (smallSiblings.length >= 2) {
             issues.push({
                 file: feature.filePath,
@@ -183,6 +197,31 @@ export function validateGraph(graph) {
                 severity: "warning",
                 message: `${smallSiblings.length} küçük görev birleştirme adayı (Faz 7.5): ${smallSiblings.map((t) => t.id).join(", ")}`,
             });
+        }
+    }
+    // Faz 14 O18 — doküman bütçesi: pilotta graph dokümanları (~82k karakter) kodun kendisinden
+    // fazlaydı. Handoff hariç (kendi sınırı var, SPEC §5a); 0 = kontrol kapalı.
+    if (validConfig) {
+        const budget = validConfig.efficiency.doc_budget;
+        const limits = {
+            task: budget.task_body,
+            feature: budget.feature_body,
+            epic: budget.epic_body,
+        };
+        for (const node of graph.nodesById.values()) {
+            const limit = limits[node.kind];
+            if (!limit)
+                continue;
+            const handoff = node.kind === "task" ? extractSection(node.body, "Handoff") : null;
+            const tokens = estimateTokens(handoff ? node.body.replace(handoff, "") : node.body);
+            if (tokens > limit) {
+                issues.push({
+                    file: node.filePath,
+                    nodeId: node.id,
+                    severity: "warning",
+                    message: `gövde ~${tokens} token, doküman bütçesi ${limit} (efficiency.doc_budget) — tekrar eden metni kısalt, arayüz/karar/kısıtı koru`,
+                });
+            }
         }
     }
     // context_budget tahmini aşan görev — gp context'in gerçek paket hesabını yeniden kullanır.

@@ -205,3 +205,65 @@ describe("createNewNode — task reads/touches (Faz 5 eklemesi)", () => {
     });
   });
 });
+
+describe("createNewNode — Faz 14 B7", () => {
+  const setup = (dir: string) => {
+    createNewNode(parseGraph(dir), { kind: "epic", slug: "catalog" });
+    createNewNode(parseGraph(dir), { kind: "feature", parent: "E01", slug: "search" });
+    return parseGraph(dir);
+  };
+
+  it("(a) 100 karakterden uzun summary yazılmadan reddedilir", () => {
+    withTempGraph({}, (graph) => {
+      expect(() => createNewNode(graph, { kind: "epic", slug: "x", summary: "a".repeat(101) })).toThrow(
+        /summary/,
+      );
+    });
+  });
+
+  it("(b) task alanları verilebilir ve şemadan geçer", () => {
+    withTempGraph({}, (_graph, dir) => {
+      const result = createNewNode(setup(dir), {
+        kind: "task",
+        parent: "E01-F01",
+        slug: "api-tests",
+        task: { type: "test", complexity: "low", risk: "med", tags: ["auth"], verify: ["node --test"] },
+      });
+      const { data } = matter(readFileSync(result.filePath, "utf-8"));
+      expect(TaskFrontmatterSchema.safeParse(data).success).toBe(true);
+      expect(data).toMatchObject({
+        type: "test",
+        complexity: "low",
+        risk: "med",
+        tags: ["auth"],
+        verify: ["node --test"],
+      });
+    });
+  });
+
+  it("(b) geçersiz enum dosya yazmadan hata verir", () => {
+    withTempGraph({}, (_graph, dir) => {
+      const graph = setup(dir);
+      expect(() =>
+        createNewNode(graph, { kind: "task", parent: "E01-F01", slug: "x", task: { complexity: "huge" } }),
+      ).toThrow(/complexity/);
+      expect(existsSync(`${dir}/E01-catalog/tasks/F01-T01-x.md`)).toBe(false);
+    });
+  });
+
+  it("O3/B4: gövde bölümleri (TODO) yerine yazılır, olmayan bölüm sona eklenir", () => {
+    withTempGraph({}, (_graph, dir) => {
+      const result = createNewNode(setup(dir), {
+        kind: "task",
+        parent: "E01-F01",
+        slug: "api",
+        body: { Görev: "Arama uç noktası.", "Kabul kriterleri": "- 200 döner", Notlar: "n" },
+      });
+      const body = matter(readFileSync(result.filePath, "utf-8")).content;
+      expect(body).toContain("## Görev\n\nArama uç noktası.\n");
+      expect(body).toContain("## Kabul kriterleri\n\n- 200 döner\n");
+      expect(body).not.toContain("(TODO)");
+      expect(body.trimEnd().endsWith("## Notlar\n\nn")).toBe(true);
+    });
+  });
+});

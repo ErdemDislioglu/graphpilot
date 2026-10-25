@@ -46,8 +46,20 @@ export function buildContext(graph: Graph, nodeId: string, config: Config): Cont
     parts.push({ label: "epic-index", content: generateEpicIndex(graph, node.epicId) });
   }
 
-  for (const target of getReads(graph, node.id)) {
+  const reads = getReads(graph, node.id);
+  for (const target of reads) {
     parts.push({ label: `read:${target.name}`, content: target.body });
+  }
+
+  // Faz 14 B8 — `optimizations.repo_map` açıkken skill agent'a "önce [[repo-map]]'e bak"
+  // diyor; harita eskiden yalnız `reads`'te varsa pakete giriyordu. Artık her pakette.
+  const repoMap = graph.nodesByName.get("repo-map");
+  if (
+    config.optimizations?.repo_map !== false &&
+    repoMap?.kind === "knowledge" &&
+    !reads.some((r) => r.name === "repo-map")
+  ) {
+    parts.push({ label: "read:repo-map", content: repoMap.body });
   }
 
   for (const dep of getDependsOn(graph, node.id)) {

@@ -308,3 +308,39 @@ describe("validateGraph — Faz 5.5 aşırı/yetersiz bölme uyarıları", () =>
     );
   });
 });
+
+describe("validateGraph — Faz 14 B14c: bağımlı küçük görevler birleştirme adayı değildir", () => {
+  it("biri diğerine depends_on ile bağlı iki küçük görev uyarı üretmez", () => {
+    withTempGraph(
+      {
+        "f.md": frontmatter(FEATURE5({ id: "E01-F01", name: "F01-x" })),
+        "a.md": frontmatter(TASK5({ id: "E01-F01-T01", name: "F01-T01-a", complexity: "low" })),
+        "b.md": frontmatter(
+          TASK5({ id: "E01-F01-T02", name: "F01-T02-b", complexity: "low", depends_on: ["E01-F01-T01"] }),
+        ),
+      },
+      (graph) => {
+        expect(validateGraph(graph).some((i) => i.message.includes("birleştirme adayı"))).toBe(false);
+      },
+    );
+  });
+});
+
+describe("validateGraph — Faz 14 O18: doküman bütçesi", () => {
+  const long = "kelime ".repeat(800);
+  it("bütçeyi aşan task gövdesi uyarı üretir; Handoff sayılmaz; 0 kapatır", () => {
+    const files = (extra: string) => ({
+      "config.yml": `${CONFIG_YML_5}${extra}`,
+      "f.md": frontmatter(FEATURE5({ id: "E01-F01", name: "F01-x" })),
+      "a.md": `${frontmatter(TASK5({ id: "E01-F01-T01", name: "F01-T01-a" }))}## Görev\n${long}\n`,
+      "b.md": `${frontmatter(TASK5({ id: "E01-F01-T02", name: "F01-T02-b" }))}## Görev\nkısa\n\n## Handoff\n${long}\n`,
+    });
+    withTempGraph(files(""), (graph) => {
+      const budget = validateGraph(graph).filter((i) => i.message.includes("doküman bütçesi"));
+      expect(budget.map((i) => i.nodeId)).toEqual(["E01-F01-T01"]);
+    });
+    withTempGraph(files("efficiency: { doc_budget: { task_body: 0 } }\n"), (graph) => {
+      expect(validateGraph(graph).some((i) => i.message.includes("doküman bütçesi"))).toBe(false);
+    });
+  });
+});

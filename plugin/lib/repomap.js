@@ -62,10 +62,10 @@ export function buildRepoMap(projectRoot, extractors = DEFAULT_EXTRACTORS) {
             continue;
         const content = readFileSync(join(projectRoot, relPath), "utf-8");
         const symbols = extractor.extract(content);
-        if (symbols.length === 0)
-            continue; // sembolsüz dosya çıktıya eklenmez (sıkıştırılmış tutmak için)
+        // Faz 14 B9 — sembolsüz dosyalar (ör. tüm `test/*.test.js`) eskiden atlanıyordu; artık
+        // yalnız yol olarak listelenir (dosyanın var olduğu bilgisi de haritanın parçası).
         // fast-glob sonuçları her platformda zaten posix (forward-slash) yol döndürür.
-        lines.push(`${relPath}: ${symbols.join(", ")}`);
+        lines.push(symbols.length === 0 ? relPath : `${relPath}: ${symbols.join(", ")}`);
     }
     return { body: lines.join("\n") + (lines.length > 0 ? "\n" : ""), fileCount: lines.length };
 }

@@ -206,6 +206,40 @@ const TeamSchema = z
     docs: TeamDocsSchema.default({ model: "haiku" }),
 })
     .strict();
+/**
+ * Faz 14 — "ölçeğe duyarlı tasarruf" ilkesi: iş bölümünü değiştiren her tasarruf bir eşiğe
+ * bağlıdır ve buradan kapatılabilir. Büyük projede kalite sorunu çıkarsa geri dönüş tek ayar.
+ * Planner/skill'ler bu değerleri `gp config --key efficiency --json` ile okur.
+ */
+const DocBudgetSchema = z
+    .object({
+    /** Tahmini token; 0 = kontrol kapalı. Arayüz/karar/kısıt kısaltılmaz, tekrar eden metin kısaltılır. */
+    task_body: z.number().int().nonnegative().default(350),
+    feature_body: z.number().int().nonnegative().default(150),
+    epic_body: z.number().int().nonnegative().default(150),
+})
+    .strict();
+const EfficiencySchema = z
+    .object({
+    /** O4 — epic tahminen bu sınırların altındaysa feature→task tek planner çağrısında açılır. 0 = kapalı. */
+    small_epic_max_features: z.number().int().nonnegative().default(3),
+    small_epic_max_tasks: z.number().int().nonnegative().default(8),
+    /** O1 — arayüzü başka düğüm kullanmıyorsa arayüz-önce görevi uygulamayla birleştirilir. */
+    merge_interface_task: z.boolean().default(true),
+    /** O2 — ayrı `type: test` görevi için en düşük risk. `low` = her zaman ayrı (eski davranış). */
+    separate_test_min_risk: RiskSchema.default("med"),
+    /** O14 adım 1 — GENİŞLETME-* planner çağrılarının modeli. `opus` = eski davranış. */
+    expansion_model: ModelSchema.exclude(["auto"]).default("sonnet"),
+    /** O16 — aynı `touches` zincirindeki sıralı low/med görevler tek agent'a verilir. */
+    feature_agent: z.boolean().default(true),
+    feature_agent_max_tasks: z.number().int().positive().default(4),
+    /** O18 — gövde bütçesi (gp validate uyarır). */
+    doc_budget: DocBudgetSchema.default({ task_body: 350, feature_body: 150, epic_body: 150 }),
+    /** O19 — `/gp:plan` tahmini görev sayısı bunun altındaysa "plugin'siz daha ucuz olabilir" uyarısı. 0 = kapalı. */
+    small_project_warn_tasks: z.number().int().nonnegative().default(6),
+})
+    .strict();
+export const DEFAULT_EFFICIENCY = EfficiencySchema.parse({});
 export const DEFAULT_OPTIMIZATIONS = {
     cache_friendly_order: true,
     log_trimming: true,
@@ -252,6 +286,7 @@ export const ConfigSchema = z
         limits: { wait_for_reset: true, max_wait_hours: 12 },
         language: "tr",
     }),
+    efficiency: EfficiencySchema.default(DEFAULT_EFFICIENCY),
     team: TeamSchema.default({
         enabled: true,
         manager: { model: "sonnet", consult_senior_for: ["architecture", "data_model", "security"], autonomy: "balanced" },

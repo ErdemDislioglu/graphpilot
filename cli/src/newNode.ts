@@ -1,5 +1,13 @@
 import { dirname, join } from "node:path";
+import matter from "gray-matter";
 import { nextCounterValue } from "./counters.js";
+import {
+  EpicFrontmatterSchema,
+  FeatureFrontmatterSchema,
+  KnowledgeFrontmatterSchema,
+  SummarySchema,
+  TaskFrontmatterSchema,
+} from "./schema/index.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 import {
   renderEpicTemplate,
@@ -7,6 +15,7 @@ import {
   renderKnowledgeTemplate,
   renderTaskTemplate,
 } from "./templates.js";
+import type { TaskTemplateExtras } from "./templates.js";
 import type { Graph, GraphNode } from "./graph/types.js";
 
 const SLUG_RE = /^[a-z][a-z0-9-]*$/;
@@ -34,6 +43,13 @@ export interface NewNodeOptions {
   reads?: string[];
   /** Faz 5 eklemesi — sadece `kind: task`. Glob desenleri, varlık kontrolü YAPILMAZ. */
   touches?: string[];
+  /** Faz 14 B7b — sadece `kind: task`: type/complexity/risk/context_size/tags/verify. */
+  task?: TaskTemplateExtras;
+  /**
+   * Faz 14 O3/B4 — gövde bölümleri (`{ "Görev": "...", "Kabul kriterleri": "..." }`).
+   * Şablondaki `(TODO)` yerine yazılır; şablonda olmayan bölüm sona eklenir.
+   */
+  body?: Record<string, string>;
 }
 
 export interface NewNodeResult {
@@ -51,6 +67,11 @@ export function createNewNode(graph: Graph, opts: NewNodeOptions): NewNodeResult
     throw new Error(`geçersiz slug: "${opts.slug}" (kebab-case olmalı, örn. search-api)`);
   }
   const summary = opts.summary ?? "(TODO özet)";
+  // Faz 14 B7a — eskiden >100 karakter summary kabul ediliyor, sonra `gp validate` reddediyordu.
+  const summaryCheck = SummarySchema.safeParse(summary);
+  if (!summaryCheck.success) {
+    throw new Error(`summary: ${summaryCheck.error.issues[0]?.message ?? "geçersiz"}`);
+  }
 
   switch (opts.kind) {
     case "epic":
@@ -72,7 +93,7 @@ function createEpic(graph: Graph, opts: NewNodeOptions, summary: string): NewNod
   ensureNameFree(graph, name);
   const dependsOn = validateDependsOn(graph, opts.dependsOn, "epic");
   const filePath = join(graph.rootDir, name, "epic.md");
-  writeFileAtomic(filePath, renderEpicTemplate(id, name, summary, dependsOn));
+  writeNodeFile(filePath, renderEpicTemplate(id, name, summary, dependsOn), "epic", opts.body);
   return { id, filePath };
 }
 
@@ -86,7 +107,7 @@ function createFeature(graph: Graph, opts: NewNodeOptions, summary: string): New
   ensureNameFree(graph, name);
   const dependsOn = validateDependsOn(graph, opts.dependsOn, "feature");
   const filePath = join(dirname(epic.filePath), "tasks", `${name}.md`);
-  writeFileAtomic(filePath, renderFeatureTemplate(id, name, summary, dependsOn));
+  writeNodeFile(filePath, renderFeatureTemplate(id, name, summary, dependsOn), "feature", opts.body);
   return { id, filePath };
 }
 
@@ -103,7 +124,12 @@ function createTask(graph: Graph, opts: NewNodeOptions, summary: string): NewNod
   const reads = validateReads(graph, opts.reads);
   const touches = opts.touches ?? [];
   const filePath = join(dirname(feature.filePath), `${name}.md`);
-  writeFileAtomic(filePath, renderTaskTemplate(id, name, summary, dependsOn, reads, touches));
+  writeNodeFile(
+    filePath,
+    renderTaskTemplate(id, name, summary, dependsOn, reads, touches, opts.task),
+    "task",
+    opts.body,
+  );
   return { id, filePath };
 }
 
@@ -111,14 +137,50 @@ function createKnowledge(graph: Graph, opts: NewNodeOptions, summary: string): N
   ensureNameFree(graph, opts.slug); // knowledge'ta id = name = slug (SPEC §6)
   if (opts.shared) {
     const filePath = join(graph.rootDir, "_shared", "knowledge", `${opts.slug}.md`);
-    writeFileAtomic(filePath, renderKnowledgeTemplate(opts.slug, summary, "shared"));
+    writeNodeFile(filePath, renderKnowledgeTemplate(opts.slug, summary, "shared"), "knowledge", opts.body);
     return { id: opts.slug, filePath };
   }
   const parentId = requireParent(opts, "epic (ör. E01), ya da --shared kullan");
   const epic = requireNode(graph, parentId, "epic");
   const filePath = join(dirname(epic.filePath), "knowledge", `${opts.slug}.md`);
-  writeFileAtomic(filePath, renderKnowledgeTemplate(opts.slug, summary, "epic"));
+  writeNodeFile(filePath, renderKnowledgeTemplate(opts.slug, summary, "epic"), "knowledge", opts.body);
   return { id: opts.slug, filePath };
+}
+
+const SCHEMA_BY_KIND = {
+  epic: EpicFrontmatterSchema,
+  feature: FeatureFrontmatterSchema,
+  task: TaskFrontmatterSchema,
+  knowledge: KnowledgeFrontmatterSchema,
+};
+
+/**
+ * Faz 14 B7 — yazmadan ÖNCE şemadan geçirir (ör. geçersiz `--complexity`), gövde
+ * bölümlerini doldurur. Bozuk düğüm hiç diske düşmez — `gp set` ile aynı ilke.
+ */
+function writeNodeFile(
+  filePath: string,
+  content: string,
+  kind: keyof typeof SCHEMA_BY_KIND,
+  body: Record<string, string> | undefined,
+): void {
+  const parsed = SCHEMA_BY_KIND[kind].safeParse(matter(content).data);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new Error(`${issue?.path.join(".") ?? "frontmatter"}: ${issue?.message ?? "geçersiz"}`);
+  }
+  writeFileAtomic(filePath, body ? fillBody(content, body) : content);
+}
+
+export function fillBody(content: string, body: Record<string, string>): string {
+  let out = content;
+  for (const [section, text] of Object.entries(body)) {
+    const placeholder = `## ${section}\n\n(TODO)\n`;
+    const value = `## ${section}\n\n${text.trim()}\n`;
+    if (out.includes(placeholder)) out = out.replace(placeholder, () => value);
+    else out = `${out.replace(/\n*$/, "\n")}\n${value}`;
+  }
+  return out;
 }
 
 function maxNumber(graph: Graph, re: RegExp): number {

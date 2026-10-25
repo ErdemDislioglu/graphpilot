@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runChecks } from "../checks.js";
+import { runChecks, runVerify } from "../checks.js";
 
 describe("runChecks — mock runner (hızlı, deterministik)", () => {
   it("sadece yapılandırılmış komutları, sırayla çalıştırır", () => {
@@ -63,5 +63,21 @@ describe("runChecks — gerçek execSync (mock yok)", () => {
   it("gerçekten başarısız bir komutun hatasını yakalar", () => {
     const results = runChecks(process.cwd(), { test: "exit 1" });
     expect(results[0].ok).toBe(false);
+  });
+});
+
+describe("runVerify — Faz 14 O9", () => {
+  it("tüm komutları sırayla çalıştırır, başarısızda durmaz ve çıktıyı yalnız başarısızda verir", () => {
+    const calls: string[] = [];
+    const results = runVerify("/proje", ["a", "b", "c"], (command, cwd) => {
+      calls.push(`${cwd}:${command}`);
+      return command === "b" ? { ok: false, output: "hata\n" } : { ok: true, output: "çıktı" };
+    });
+    expect(calls).toEqual(["/proje:a", "/proje:b", "/proje:c"]);
+    expect(results).toEqual([
+      { command: "a", ok: true, output: undefined },
+      { command: "b", ok: false, output: "hata" },
+      { command: "c", ok: true, output: undefined },
+    ]);
   });
 });

@@ -200,3 +200,49 @@ describe("ConfigSchema — team (Faz 13.2 eklemesi)", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("ConfigSchema — Faz 14 efficiency (ölçek koruması)", () => {
+  const BASE = {
+    routing: [{ when: {}, model: "haiku" }],
+    escalation: ["haiku"],
+    max_attempts_per_model: 1,
+    budgets: { default_context: 8000, max_turns: 25 },
+  };
+
+  it("varsayılanlar: tasarruflar açık, eşikler belgedeki değerler", () => {
+    expect(ConfigSchema.parse(BASE).efficiency).toEqual({
+      small_epic_max_features: 3,
+      small_epic_max_tasks: 8,
+      merge_interface_task: true,
+      separate_test_min_risk: "med",
+      expansion_model: "sonnet",
+      feature_agent: true,
+      feature_agent_max_tasks: 4,
+      doc_budget: { task_body: 350, feature_body: 150, epic_body: 150 },
+      small_project_warn_tasks: 6,
+    });
+  });
+
+  it("her tasarruf tek ayarla eski davranışa döner; bilinmeyen anahtar reddedilir", () => {
+    const off = ConfigSchema.parse({
+      ...BASE,
+      efficiency: {
+        small_epic_max_features: 0,
+        merge_interface_task: false,
+        separate_test_min_risk: "low",
+        expansion_model: "opus",
+        feature_agent: false,
+        small_project_warn_tasks: 0,
+      },
+    }).efficiency;
+    expect(off).toMatchObject({
+      small_epic_max_features: 0,
+      merge_interface_task: false,
+      separate_test_min_risk: "low",
+      expansion_model: "opus",
+      feature_agent: false,
+      small_project_warn_tasks: 0,
+    });
+    expect(ConfigSchema.safeParse({ ...BASE, efficiency: { yok: 1 } }).success).toBe(false);
+  });
+});

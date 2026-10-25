@@ -135,6 +135,45 @@ declare const TeamSchema: z.ZodObject<{
         budget_pct: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
+declare const EfficiencySchema: z.ZodObject<{
+    small_epic_max_features: z.ZodDefault<z.ZodNumber>;
+    small_epic_max_tasks: z.ZodDefault<z.ZodNumber>;
+    merge_interface_task: z.ZodDefault<z.ZodBoolean>;
+    separate_test_min_risk: z.ZodDefault<z.ZodEnum<{
+        low: "low";
+        med: "med";
+        high: "high";
+    }>>;
+    expansion_model: z.ZodDefault<z.ZodEnum<{
+        haiku: "haiku";
+        sonnet: "sonnet";
+        opus: "opus";
+        fable: "fable";
+    }>>;
+    feature_agent: z.ZodDefault<z.ZodBoolean>;
+    feature_agent_max_tasks: z.ZodDefault<z.ZodNumber>;
+    doc_budget: z.ZodDefault<z.ZodObject<{
+        task_body: z.ZodDefault<z.ZodNumber>;
+        feature_body: z.ZodDefault<z.ZodNumber>;
+        epic_body: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
+    small_project_warn_tasks: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strict>;
+export declare const DEFAULT_EFFICIENCY: {
+    small_epic_max_features: number;
+    small_epic_max_tasks: number;
+    merge_interface_task: boolean;
+    separate_test_min_risk: "low" | "med" | "high";
+    expansion_model: "haiku" | "sonnet" | "opus" | "fable";
+    feature_agent: boolean;
+    feature_agent_max_tasks: number;
+    doc_budget: {
+        task_body: number;
+        feature_body: number;
+        epic_body: number;
+    };
+    small_project_warn_tasks: number;
+};
 export declare const DEFAULT_OPTIMIZATIONS: {
     readonly cache_friendly_order: true;
     readonly log_trimming: true;
@@ -277,6 +316,30 @@ export declare const ConfigSchema: z.ZodObject<{
             en: "en";
         }>>;
     }, z.core.$strict>>;
+    efficiency: z.ZodDefault<z.ZodObject<{
+        small_epic_max_features: z.ZodDefault<z.ZodNumber>;
+        small_epic_max_tasks: z.ZodDefault<z.ZodNumber>;
+        merge_interface_task: z.ZodDefault<z.ZodBoolean>;
+        separate_test_min_risk: z.ZodDefault<z.ZodEnum<{
+            low: "low";
+            med: "med";
+            high: "high";
+        }>>;
+        expansion_model: z.ZodDefault<z.ZodEnum<{
+            haiku: "haiku";
+            sonnet: "sonnet";
+            opus: "opus";
+            fable: "fable";
+        }>>;
+        feature_agent: z.ZodDefault<z.ZodBoolean>;
+        feature_agent_max_tasks: z.ZodDefault<z.ZodNumber>;
+        doc_budget: z.ZodDefault<z.ZodObject<{
+            task_body: z.ZodDefault<z.ZodNumber>;
+            feature_body: z.ZodDefault<z.ZodNumber>;
+            epic_body: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
+        small_project_warn_tasks: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     team: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         manager: z.ZodDefault<z.ZodObject<{
@@ -364,4 +427,5 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type Optimizations = z.infer<typeof OptimizationsSchema>;
 export type AutopilotConfig = z.infer<typeof AutopilotSchema>;
 export type TeamConfig = z.infer<typeof TeamSchema>;
+export type EfficiencyConfig = z.infer<typeof EfficiencySchema>;
 export {};

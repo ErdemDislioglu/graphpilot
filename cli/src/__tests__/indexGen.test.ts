@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseGraph } from "../graph/parser.js";
 import { generateEpicIndex, generateRootIndex } from "../indexGen.js";
+import { withTempGraph } from "../testUtils/tempGraph.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bookstoreGraph = join(here, "../../../docs/examples/bookstore/.graph");
@@ -57,5 +58,28 @@ describe("generateEpicIndex — gerçek bookstore graph", () => {
   it("var olmayan epic için düşmeden çalışır", () => {
     expect(() => generateEpicIndex(graph, "E99")).not.toThrow();
     expect(generateEpicIndex(graph, "E99")).toContain("epic bulunamadı");
+  });
+});
+
+describe("generateEpicIndex — Faz 14 B10: model sütunu gp route ile aynı kaynaktan", () => {
+  const files = (config: string) => ({
+    "E01-x/epic.md":
+      '---\nid: "E01"\nkind: "epic"\nname: "E01-x"\nsummary: "s"\nstatus: "pending"\nexpanded: true\n---\n',
+    "E01-x/tasks/F01-T01-a.md":
+      '---\nid: "E01-F01-T01"\nkind: "task"\nname: "F01-T01-a"\nlevel: 3\nsummary: "s"\ntype: "test"\ncomplexity: "low"\nrisk: "low"\ncontext_size: "small"\nmodel: "auto"\nagent: "auto"\ncontext_budget: 8000\nstatus: "pending"\nattempts: 0\n---\n',
+    "config.yml": config,
+  });
+  const ROUTING = "routing:\n  - when: {}\n    model: opus\nescalation: [opus]\nmax_attempts_per_model: 1\nbudgets: { default_context: 8000, max_turns: 25 }\n";
+
+  it("ekip modu açıkken (varsayılan) team tablosu kullanılır, config.routing değil", () => {
+    withTempGraph(files(ROUTING), (graph) => {
+      expect(generateEpicIndex(graph, "E01")).toMatch(/\| E01-F01-T01 \| task \| s \| pending \| haiku \|/);
+    });
+  });
+
+  it("ekip modu kapalıyken config.routing kullanılır", () => {
+    withTempGraph(files(`${ROUTING}team: { enabled: false }\n`), (graph) => {
+      expect(generateEpicIndex(graph, "E01")).toMatch(/\| E01-F01-T01 \| task \| s \| pending \| opus \|/);
+    });
   });
 });

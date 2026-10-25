@@ -45,6 +45,16 @@ export function renderFeatureTemplate(
   );
 }
 
+/** Faz 14 B7b — `gp new task`/`gp apply` ile verilebilen alanlar (eskiden hep feature/med). */
+export interface TaskTemplateExtras {
+  type?: string;
+  complexity?: string;
+  risk?: string;
+  context_size?: string;
+  tags?: string[];
+  verify?: string[];
+}
+
 export function renderTaskTemplate(
   id: string,
   name: string,
@@ -52,6 +62,7 @@ export function renderTaskTemplate(
   dependsOn: string[] = [],
   reads: string[] = [],
   touches: string[] = [],
+  extra: TaskTemplateExtras = {},
 ): string {
   return (
     fm({
@@ -60,15 +71,17 @@ export function renderTaskTemplate(
       name,
       level: 3,
       summary,
-      type: "feature",
-      complexity: "med",
-      risk: "low",
-      context_size: "small",
+      type: extra.type ?? "feature",
+      complexity: extra.complexity ?? "med",
+      risk: extra.risk ?? "low",
+      context_size: extra.context_size ?? "small",
       model: "auto",
       agent: "auto",
       depends_on: dependsOn,
       reads: reads.map((n) => `[[${n}]]`),
       touches,
+      ...(extra.tags && extra.tags.length > 0 ? { tags: extra.tags } : {}),
+      ...(extra.verify && extra.verify.length > 0 ? { verify: extra.verify } : {}),
       context_budget: 8000,
       status: "pending",
       attempts: 0,

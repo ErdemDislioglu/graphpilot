@@ -14,9 +14,10 @@ import { initGraph } from "./init.js";
 import { runDoctor } from "./doctor.js";
 import { setBrief } from "./brief.js";
 import { applyFlagFixes, computeFlagFixes } from "./fixFlags.js";
-import { runChecks } from "./checks.js";
+import { runChecks, runVerify } from "./checks.js";
 import { extractAcceptanceCriteria, readGitDiff, runAcceptanceCheck } from "./check.js";
 import { applyRollup } from "./rollup.js";
+import { applyPlan } from "./apply.js";
 import type { AcceptanceCheckResult } from "./check.js";
 import { escalateNode } from "./escalate.js";
 import { failNode } from "./fail.js";
@@ -78,6 +79,19 @@ interface BaseOpts {
 
 function loadGraph(opts: BaseOpts): Graph {
   return parseGraph(opts.graphRoot);
+}
+
+/** Feature/epic roll-up'ı (Faz 14 B2) + INDEX.md ve tüm epic `_index.md`'leri. */
+function refreshGraphState(graphRoot: string) {
+  const rollup = applyRollup(parseGraph(graphRoot));
+  const graph = parseGraph(graphRoot);
+  writeFileAtomic(join(graphRoot, "INDEX.md"), generateRootIndex(graph));
+  const epicIds = [...graph.nodesById.values()].filter((n) => n.kind === "epic").map((n) => n.id);
+  for (const epicId of epicIds) {
+    const dir = graph.nodesById.get(epicId)!.filePath.replace(/\/epic\.md$/, "");
+    writeFileAtomic(join(dir, "_index.md"), generateEpicIndex(graph, epicId));
+  }
+  return { rollup, epics: epicIds.length };
 }
 
 function loadConfig(graph: Graph) {
@@ -245,23 +259,13 @@ export function buildCli(): Command {
   ).action(
     action((opts: BaseOpts) => {
       // Faz 14 B2: indeks üretilmeden önce feature/epic durumları task'lardan türetilir.
-      const rollup = applyRollup(loadGraph(opts));
-      const graph = loadGraph(opts);
-      writeFileAtomic(join(opts.graphRoot, "INDEX.md"), generateRootIndex(graph));
-      const epicIds = [...graph.nodesById.values()]
-        .filter((n) => n.kind === "epic")
-        .map((n) => n.id);
-      for (const epicId of epicIds) {
-        const epic = graph.nodesById.get(epicId)!;
-        const dir = epic.filePath.replace(/\/epic\.md$/, "");
-        writeFileAtomic(join(dir, "_index.md"), generateEpicIndex(graph, epicId));
-      }
+      const { rollup, epics } = refreshGraphState(opts.graphRoot);
       output(
         opts,
-        { epics: epicIds.length, rollup },
+        { epics, rollup },
         () =>
           [
-            `✓ INDEX.md + ${epicIds.length} epic _index.md üretildi.`,
+            `✓ INDEX.md + ${epics} epic _index.md üretildi.`,
             ...rollup.map((c) => `  ↳ ${c.id}: ${c.from} → ${c.to}`),
           ].join("\n"),
       );
@@ -495,6 +499,56 @@ export function buildCli(): Command {
     );
 
   withGraphRoot(
+    program
+      .command("config")
+      .description("Varsayılanları uygulanmış config.yml'i basar (skill'ler politika ayarlarını buradan okur)"),
+  )
+    .option("--key <key>", "yalnız bu üst düzey anahtar (ör. efficiency)")
+    .action(
+      action((opts: BaseOpts & { key?: string }) => {
+        const config = loadConfig(loadGraph(opts)) as Record<string, unknown>;
+        if (opts.key && !(opts.key in config)) throw new Error(`config'te böyle bir anahtar yok: ${opts.key}`);
+        const data = opts.key ? config[opts.key] : config;
+        output(opts, data, () => JSON.stringify(data, null, 2));
+      }),
+    );
+
+  withGraphRoot(
+    program
+      .command("apply")
+      .description(
+        "Faz 14 O3: plan.json'daki düğümleri (frontmatter + gövde) doğrulayıp tek seferde yazar",
+      ),
+  )
+    .argument("<plan>", "plan JSON dosyası ({ nodes: [...], expanded: [...] })")
+    .option("--dry-run", "yalnız doğrula, hiçbir dosya yazma")
+    .action(
+      action((planPath: string, opts: BaseOpts & { dryRun?: boolean }) => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(readFileSync(planPath, "utf-8"));
+        } catch (err) {
+          throw new Error(`plan okunamadı/JSON değil: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        const result = applyPlan(opts.graphRoot, raw, { dryRun: opts.dryRun });
+        if (!result.ok) {
+          output(opts, result, () => result.errors.map((e) => `✗ ${e}`).join("\n"));
+          process.exitCode = 1;
+          return;
+        }
+        const state = result.dryRun ? { rollup: [] } : refreshGraphState(opts.graphRoot);
+        output(opts, { ...result, rollup: state.rollup }, () =>
+          result.dryRun
+            ? "✓ plan geçerli (dry-run, hiçbir dosya yazılmadı)"
+            : [
+                ...result.created.map((n) => `✓ ${n.id}${n.ref ? ` (${n.ref})` : ""} → ${n.filePath}`),
+                ...result.expanded.map((id) => `✓ ${id} expanded: true`),
+              ].join("\n"),
+        );
+      }),
+    );
+
+  withGraphRoot(
     program.command("new").description("Yeni düğüm iskeleti oluştur (format hatası olmaz)"),
   )
     .argument("<kind>", "epic | feature | task | knowledge")
@@ -502,12 +556,25 @@ export function buildCli(): Command {
     .option("--parent <id>", "epic/feature ID'si (feature/task/epic-knowledge için zorunlu)")
     .option("--summary <text>", "tek satır özet")
     .option("--shared", "knowledge için: _shared/knowledge/ altına yaz")
-    .option("--depends-on <ids>", "virgülle ayrılmış ID listesi (aynı türden, zaten var olmalı)")
+    .option(
+      "--depends-on <ids>",
+      "virgülle ayrılmış ID listesi (aynı kind: task→task, feature→feature; başka feature'daki task'lar da olur; zaten var olmalı)",
+    )
     .option(
       "--reads <names>",
       "sadece task: virgülle ayrılmış knowledge adı listesi (zaten var olmalı)",
     )
     .option("--touches <globs>", "sadece task: virgülle ayrılmış glob deseni listesi")
+    .option("--type <type>", "sadece task: scaffold|feature|refactor|test|docs|config|fix (varsayılan feature)")
+    .option("--complexity <level>", "sadece task: low|med|high (varsayılan med)")
+    .option("--risk <level>", "sadece task: low|med|high (varsayılan low)")
+    .option("--context-size <size>", "sadece task: small|medium|large (varsayılan small)")
+    .option("--tags <tags>", "sadece task: virgülle ayrılmış etiket listesi")
+    .option(
+      "--verify <cmd>",
+      "sadece task: doğrulama komutu (tekrarlanabilir; gp verify çalıştırır)",
+      (v: string, prev: string[] = []) => [...prev, v],
+    )
     .action(
       action(
         (
@@ -520,6 +587,12 @@ export function buildCli(): Command {
             dependsOn?: string;
             reads?: string;
             touches?: string;
+            type?: string;
+            complexity?: string;
+            risk?: string;
+            contextSize?: string;
+            tags?: string;
+            verify?: string[];
           },
         ) => {
           if (!["epic", "feature", "task", "knowledge"].includes(kind)) {
@@ -536,6 +609,14 @@ export function buildCli(): Command {
             dependsOn: splitCsv(opts.dependsOn),
             reads: splitCsv(opts.reads),
             touches: splitCsv(opts.touches),
+            task: {
+              type: opts.type,
+              complexity: opts.complexity,
+              risk: opts.risk,
+              context_size: opts.contextSize,
+              tags: splitCsv(opts.tags),
+              verify: opts.verify,
+            },
           });
           output(opts, result, () => `✓ ${result.id} → ${result.filePath}`);
         },
@@ -714,6 +795,37 @@ export function buildCli(): Command {
                 .join("\n"),
         );
         if (hasFailure) process.exitCode = 1;
+      }),
+    );
+
+  withGraphRoot(
+    program
+      .command("verify")
+      .description("Faz 14 O9: görevin verify: komutlarını çalıştırır (Katman 1, sıfır token)"),
+  )
+    .argument("<id>", "task ID'si")
+    .option("-p, --project-root <path>", "proje kökü", ".")
+    .action(
+      action((id: string, opts: BaseOpts & { projectRoot: string }) => {
+        const graph = loadGraph(opts);
+        const config = loadConfig(graph);
+        const node = graph.nodesById.get(id);
+        if (!node || node.kind !== "task") throw new Error(`task bulunamadı: ${id}`);
+        const commands = Array.isArray(node.frontmatter.verify)
+          ? node.frontmatter.verify.filter((c): c is string => typeof c === "string")
+          : [];
+        const results = runVerify(opts.projectRoot, commands, undefined, {
+          trimOutput: config.optimizations.log_trimming,
+        });
+        const ok = results.every((r) => r.ok);
+        output(opts, { id, ok, verified: commands.length > 0, results }, () =>
+          commands.length === 0
+            ? `· ${id}: verify: tanımlı değil (doğrulanmadı)`
+            : results
+                .map((r) => `${r.ok ? "✓" : "✗"} ${r.command}${r.output ? `\n${r.output}` : ""}`)
+                .join("\n"),
+        );
+        if (!ok) process.exitCode = 1;
       }),
     );
 

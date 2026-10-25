@@ -64,4 +64,50 @@ describe("setFrontmatter", () => {
       expect(result.ok).toBe(false);
     });
   });
+
+  it("Faz 14 B7c: liste alanları a,b ve JSON sözdizimini kabul eder; reads çıplak adı [[ad]] yapar", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(TASK({})),
+        "b.md": frontmatter(TASK({ id: "E01-F01-T02", name: "b" })),
+        "k.md": `---\nid: "x"\nkind: "knowledge"\nname: "x"\nsummary: "s"\nscope: "shared"\nupdated_by: []\n---\n`,
+      },
+      (graph, dir) => {
+        expect(setFrontmatter(graph, "E01-F01-T02", { depends_on: "E01-F01-T01", reads: "x" }).ok).toBe(true);
+        expect(setFrontmatter(graph, "E01-F01-T01", { tags: '["auth","security"]', touches: "" }).ok).toBe(true);
+        expect(setFrontmatter(graph, "x", { updated_by: "E01-F01-T01,E01-F01-T02" }).ok).toBe(true);
+        const b = matter(readFileSync(`${dir}/b.md`, "utf-8") + " ").data;
+        expect(b.depends_on).toEqual(["E01-F01-T01"]);
+        expect(b.reads).toEqual(["[[x]]"]);
+        const a = matter(readFileSync(`${dir}/a.md`, "utf-8") + " ").data;
+        expect(a.tags).toEqual(["auth", "security"]);
+        expect(a.touches).toEqual([]);
+        expect(matter(readFileSync(`${dir}/k.md`, "utf-8") + " ").data.updated_by).toEqual([
+          "E01-F01-T01",
+          "E01-F01-T02",
+        ]);
+      },
+    );
+  });
+
+  it("Faz 14 B7d: yalnız değişen satır yeniden yazılır; diğer satırlar ve varsayılanlar eklenmez", () => {
+    const original =
+      '---\nid: "E01-F01-T01"\nkind: "task"\nname: "a"\nlevel: 3\nsummary: "s, tırnaklı: özet"\ntype: "feature"\ncomplexity: "low"\nrisk: "low"\ncontext_size: "small"\nmodel: "auto"\nagent: "auto"\ntouches:\n  - src/a.js\n  - src/b.js\ncontext_budget: 8000\nstatus: "pending"\nattempts: 0\n---\n## Görev\nx\n';
+    withTempGraph({ "a.md": original }, (graph, dir) => {
+      expect(setFrontmatter(graph, "E01-F01-T01", { status: "done", touches: "src/c.js" }).ok).toBe(true);
+      expect(readFileSync(`${dir}/a.md`, "utf-8")).toBe(
+        original
+          .replace('status: "pending"', 'status: "done"')
+          .replace("touches:\n  - src/a.js\n  - src/b.js", 'touches: ["src/c.js"]'),
+      );
+    });
+  });
+
+  it("Faz 14 B7c: geçersiz JSON liste dosyayı değiştirmez", () => {
+    withTempGraph({ "a.md": frontmatter(TASK({})) }, (graph, dir) => {
+      const before = readFileSync(`${dir}/a.md`, "utf-8");
+      expect(setFrontmatter(graph, "E01-F01-T01", { depends_on: "[bozuk" }).ok).toBe(false);
+      expect(readFileSync(`${dir}/a.md`, "utf-8")).toBe(before);
+    });
+  });
 });

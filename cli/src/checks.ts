@@ -59,3 +59,27 @@ function truncate(output: string): string {
   const tail = lines.length <= MAX_OUTPUT_LINES ? lines : lines.slice(-MAX_OUTPUT_LINES);
   return tail.join("\n").trim();
 }
+
+export interface VerifyResult {
+  command: string;
+  ok: boolean;
+  /** Sadece başarısızlıkta — `runChecks` ile aynı kırpma. */
+  output?: string;
+}
+
+/**
+ * Faz 14 O9 — görevin kendi `verify:` komutlarını sırayla çalıştırır (Katman 1'in görev
+ * düzeyi). İlk başarısızlıkta durmaz: hangi komutların geçtiği de görünsün.
+ */
+export function runVerify(
+  projectRoot: string,
+  commands: string[],
+  runner: CommandRunner = defaultRunner,
+  opts: { trimOutput?: boolean } = {},
+): VerifyResult[] {
+  const trimOutput = opts.trimOutput ?? true;
+  return commands.map((command) => {
+    const { ok, output } = runner(command, projectRoot);
+    return { command, ok, output: ok ? undefined : trimOutput ? truncate(output) : output.trim() };
+  });
+}

@@ -40,3 +40,14 @@ function truncate(output) {
     const tail = lines.length <= MAX_OUTPUT_LINES ? lines : lines.slice(-MAX_OUTPUT_LINES);
     return tail.join("\n").trim();
 }
+/**
+ * Faz 14 O9 — görevin kendi `verify:` komutlarını sırayla çalıştırır (Katman 1'in görev
+ * düzeyi). İlk başarısızlıkta durmaz: hangi komutların geçtiği de görünsün.
+ */
+export function runVerify(projectRoot, commands, runner = defaultRunner, opts = {}) {
+    const trimOutput = opts.trimOutput ?? true;
+    return commands.map((command) => {
+        const { ok, output } = runner(command, projectRoot);
+        return { command, ok, output: ok ? undefined : trimOutput ? truncate(output) : output.trim() };
+    });
+}

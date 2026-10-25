@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { writeFileAtomic } from "./atomicWrite.js";
 import { computeEpicDone, computeFeatureDone } from "./epicStatus.js";
+import { patchFrontmatterLines } from "./set.js";
 /**
  * Roll-up'ın yönettiği durumlar. `failed`/`blocked`/`skipped`/`needs_decision` bir insan
  * ya da hata politikası kararıdır — task'lardan türetilmez, dokunulmaz.
@@ -36,22 +37,10 @@ export function computeRollup(graph) {
 export function applyRollup(graph) {
     const changes = computeRollup(graph);
     for (const change of changes) {
-        writeStatusLine(graph.nodesById.get(change.id).filePath, change.to);
+        const { filePath } = graph.nodesById.get(change.id);
+        // Yalnız `status:` satırı değişir (B7d'nin biçimi koruyan yazıcısı) — roll-up her task
+        // bitişinde çalıştığı için epic/feature dosyalarında diff gürültüsü üretmez.
+        writeFileAtomic(filePath, patchFrontmatterLines(readFileSync(filePath, "utf-8"), { status: change.to }));
     }
     return changes;
-}
-/**
- * Frontmatter'daki yalnız `status:` satırını değiştirir. `setFrontmatter` tüm frontmatter'ı
- * yeniden biçimlendiriyor (B7d) — otomatik roll-up her task bitişinde çalıştığı için
- * epic/feature dosyalarında diff gürültüsü üretmesin diye geri kalan satırlara dokunulmaz.
- */
-function writeStatusLine(filePath, status) {
-    const raw = readFileSync(filePath, "utf-8");
-    const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
-    const statusLine = /^status:.*$/m;
-    if (!match || !statusLine.test(match[1])) {
-        throw new Error(`${filePath}: frontmatter'da 'status:' satırı yok`);
-    }
-    const frontmatter = match[1].replace(statusLine, `status: ${status}`);
-    writeFileAtomic(filePath, raw.replace(match[1], frontmatter));
 }
