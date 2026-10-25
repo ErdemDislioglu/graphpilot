@@ -17,44 +17,32 @@ argument-hint: "[--epic <id>] [--max-nodes N]"
 > sıradaki görev `gp` ile deterministik belirlenir. Sadece bir bulgu/hata/çelişki
 > geldiğinde (aşağıdaki 4-6. adımlar) kendi yargını kullanırsın.
 
-Bu skill `/gp:run`'ın (Faz 6) ÜZERİNE kuruludur — 0.5/1/3/6/7/8. adımlar `/gp:run` ile
-AYNI (oraya bak, burada tekrar edilmiyor): kaldığı yerden devam, döngü/expand mantığı,
-doğrulama döngüsü (yaz→kontrol et→düzelt), git/temiz ağaç, token-optimizasyon hook'ları,
-kullanım limiti. Farklı olan SADECE 2. adım (atama) ve 4-6. adımlar (hata/bulgu/karar).
+Bu skill `/gp:run`'ın ÜZERİNE kuruludur — başlangıç, döngü, genişletme, agent çağrısı,
+doğrulama (`gp gate`), bitiş (`gp finish`) ve bitirme `/gp:run` ile AYNI (oraya bak,
+burada tekrar edilmiyor; `/gp:run`'ı ayrıca invoke etme). Farklı olan SADECE 5. adım
+(ekip zinciri) ve 6. adım (bulgu/karar).
 
 ## 0. Parametreler
 `--epic <id>`, `--max-nodes N` — `/gp:run`'daki gibi.
 
-## 2. Her task için — atama (13.3, `/gp:run`'ın "route" adımının yerine)
-
-```
-node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" team assign <id> --json     # { role, model, agent }
-node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" context <id> --json
-node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" set <id> status=running
-```
-`role: junior` → `agent: coder`; `senior` → `agent: senior`; `tester`/`docs` aynı isimli
-agent. Agent tool çağrısı `/gp:run`'ın 2. adımıyla AYNI (`subagent_type: agent`,
-`model: model`, context dosyasının içeriği + tur bütçesi notu).
-
-## 3. Doğrulama döngüsü
-`/gp:run`'ın 3. adımıyla AYNI — doğrulama döngüsü ROLDEN bağımsız çalışır.
-
-## 4. Başarı
-`/gp:run`'ın 4. adımıyla AYNI (Handoff, bilgi güncelleme, commit, repo-map tazeleme).
+## 2. Atama
+`gp start` ekip modunda atamayı kendisi yapar (13.3 — `config.team.*`): `agent` `coder`
+(Junior) / `senior` / `tester` / `docs` döner. Ayrı `team assign` çağrısı gerekmez;
+neden bu role gittiğini görmek istersen `gp team assign <id> --json`.
 
 ## 5. Başarısızlık — ekip zinciri (13.5, `/gp:run`'ın "Hata politikası"nın yerine)
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" team escalate <id> --json
 ```
-- `escalated: true` → `toRole`/`toModel` ile `gp context <id>`'yi YENİDEN oku, 2. adıma
-  dön (atama tekrar `gp team assign` ile — artık yeni rolü/modeli dönecek). `toRole`
+- `escalated: true` → `gp start <id> -p <kök> --json` ile yeniden başlat (artık yeni
+  rolü/modeli döner), `/gp:run` §2'deki gibi agent'ı çağır. `toRole`
   junior→senior'a geçtiyse: Handoff'a (ya da agent'a verilecek talimata) junior'ın
   denemesinin KISA ÖZETİNİ ekle (ne denendi, hangi hata — `## Hata geçmişi`'nin son
   satırı yeterli, TÜM denemeyi tekrar verme — 13.5).
 - `escalated: false` (zincirin sonu, senior da başarısız oldu) →
   `node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" fail <id> --reason "<kısa sebep>" --json`,
-  `git restore .`, döngüye dön. Bu, roadmap 13.8'in "Senior da çözemedi → kullanıcıya
+  git varsa `git restore .`, döngüye dön. Bu, roadmap 13.8'in "Senior da çözemedi → kullanıcıya
   sorar" satırının BAŞLANGICI — bir sonraki iterasyonda bu düğüm artık `ready` değil,
   `failed`; döngü onu `needs_decision`/onay akışına (Faz 12.6, `gp status`'ta görünür)
   bırakır. Kullanıcıya AskUserQuestion ile sor: "`<id>` senior'da da başarısız oldu

@@ -18,6 +18,7 @@ import { runChecks, runVerify } from "./checks.js";
 import { extractAcceptanceCriteria, readGitDiff, runAcceptanceCheck } from "./check.js";
 import { applyRollup } from "./rollup.js";
 import { applyPlan } from "./apply.js";
+import { computeChain, finishTask, gateTask, refreshGraphState, startTasks } from "./orchestrate.js";
 import { escalateNode } from "./escalate.js";
 import { failNode } from "./fail.js";
 import { findExpandCandidates } from "./expandCandidates.js";
@@ -62,18 +63,6 @@ import { emitEvent } from "./autopilot/eventBus.js";
 import { appendErrorHistoryLine } from "./errorHistory.js";
 function loadGraph(opts) {
     return parseGraph(opts.graphRoot);
-}
-/** Feature/epic roll-up'ı (Faz 14 B2) + INDEX.md ve tüm epic `_index.md`'leri. */
-function refreshGraphState(graphRoot) {
-    const rollup = applyRollup(parseGraph(graphRoot));
-    const graph = parseGraph(graphRoot);
-    writeFileAtomic(join(graphRoot, "INDEX.md"), generateRootIndex(graph));
-    const epicIds = [...graph.nodesById.values()].filter((n) => n.kind === "epic").map((n) => n.id);
-    for (const epicId of epicIds) {
-        const dir = graph.nodesById.get(epicId).filePath.replace(/\/epic\.md$/, "");
-        writeFileAtomic(join(dir, "_index.md"), generateEpicIndex(graph, epicId));
-    }
-    return { rollup, epics: epicIds.length };
 }
 function loadConfig(graph) {
     const result = ConfigSchema.safeParse(graph.rawConfig);
@@ -587,6 +576,69 @@ export function buildCli() {
                 .map((r) => `${r.ok ? "✓" : "✗"} ${r.name} (${r.command})${r.output ? `\n${r.output}` : ""}`)
                 .join("\n"));
         if (hasFailure)
+            process.exitCode = 1;
+    }));
+    withGraphRoot(program
+        .command("start")
+        .description("Faz 14 O5: route + context + status=running (görev başına tek komut)"))
+        .argument("<ids...>", "task ID'leri (birden çoksa tek agent'a verilecek sıralı zincir)")
+        .option("--chain", "Faz 14 O16: tek ID'yi aynı dosya zincirindeki sıralı görevlerle genişlet")
+        .option("-p, --project-root <path>", "proje kökü (git baseline için)", ".")
+        .action(action((ids, opts) => {
+        const graph = loadGraph(opts);
+        const config = loadConfig(graph);
+        if (opts.chain && ids.length !== 1)
+            throw new Error("--chain tek bir ID ile kullanılır");
+        const resolved = opts.chain ? computeChain(graph, ids[0], config) : ids;
+        const result = startTasks(opts.graphRoot, resolved, config, { projectRoot: opts.projectRoot });
+        output(opts, result, () => [
+            ...result.tasks.map((t) => `▶ ${t.id} → ${t.agent}/${t.model} · ${t.contextPath}`),
+            result.tasks.length > 1
+                ? `  zincir: tek agent ${result.group.agent}/${result.group.model}, ${result.group.max_turns} tur`
+                : "",
+        ]
+            .filter(Boolean)
+            .join("\n"));
+    }));
+    withGraphRoot(program
+        .command("gate")
+        .description("Faz 14 O5/O9: bir doğrulama turu — Katman 1 + verify + (gerekirse) Katman 2 + fix-loop kararı"))
+        .argument("<id>", "task ID'si")
+        .requiredOption("--round <n>", "tur numarası (1'den başlar)", (v) => Number(v))
+        .option("-p, --project-root <path>", "proje kökü", ".")
+        .action(action((id, opts) => {
+        const config = loadConfig(loadGraph(opts));
+        const result = gateTask(opts.graphRoot, id, config, {
+            projectRoot: opts.projectRoot,
+            round: opts.round,
+        });
+        output(opts, result, () => [
+            `${result.decision.toUpperCase()} (${result.reason}) — ${result.issues.length} eksik`,
+            ...result.issues.map((i) => `  - ${i}`),
+            result.unverified ? "  ⚠ görev düzeyi doğrulama yapılamadı (verify: yok, Katman 2 yok)" : "",
+        ]
+            .filter(Boolean)
+            .join("\n"));
+    }));
+    withGraphRoot(program
+        .command("finish")
+        .description("Faz 14 O5: Handoff kontrolü + done + roll-up + indeks + repo-map + git commit"))
+        .argument("<id>", "task ID'si")
+        .option("-p, --project-root <path>", "proje kökü", ".")
+        .option("--base <sha>", "gp start'ın verdiği git baseline (WIP commit'ler tek commit'e iner)")
+        .action(action((id, opts) => {
+        const config = loadConfig(loadGraph(opts));
+        const result = finishTask(opts.graphRoot, id, config, {
+            projectRoot: opts.projectRoot,
+            base: opts.base,
+        });
+        output(opts, result, () => result.ok
+            ? [
+                `✓ ${id} done${result.committed ? " · commit" : ""}${result.repomap ? " · repo-map" : ""}`,
+                ...result.rollup.map((c) => `  ↳ ${c.id}: ${c.from} → ${c.to}`),
+            ].join("\n")
+            : result.errors.map((e) => `✗ ${e}`).join("\n"));
+        if (!result.ok)
             process.exitCode = 1;
     }));
     withGraphRoot(program
