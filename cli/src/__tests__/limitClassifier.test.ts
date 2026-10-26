@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyLimitError } from "../autopilot/limitClassifier.js";
+import { isRateLimitSignal } from "../runModeB.js";
 
 describe("classifyLimitError", () => {
   it.each([
@@ -45,4 +46,20 @@ describe("classifyLimitError", () => {
     const result = classifyLimitError("You've hit your monthly spend limit and your session limit");
     expect(result.kind).toBe("spend_limit");
   });
+});
+
+describe("HTTP 429 — bağlamsız sayı limit sayılmaz (Faz 12.13 pilot bulgusu)", () => {
+  it("claude -p JSON çıktısındaki 429 içeren sayılar limit sinyali DEĞİL", () => {
+    const stdout = '{"type":"result","subtype":"error_max_turns","duration_ms":14291,"usage":{"input_tokens":4290}}';
+    expect(classifyLimitError(stdout)).toEqual({ kind: null });
+    expect(isRateLimitSignal(stdout)).toBe(false);
+  });
+
+  it.each(["429 Too Many Requests", "API Error: status 429", "HTTP 429", "error: 429"])(
+    "bağlamıyla gelen 429 rate_limit sayılır: %s",
+    (text) => {
+      expect(classifyLimitError(text).kind).toBe("rate_limit");
+      expect(isRateLimitSignal(text)).toBe(true);
+    },
+  );
 });

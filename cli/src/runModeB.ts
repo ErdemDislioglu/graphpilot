@@ -1,5 +1,6 @@
 import { execSync, spawnSync } from "node:child_process";
 import type { AgentDefinition } from "./agentFile.js";
+import { HTTP_429_RE } from "./autopilot/limitClassifier.js";
 
 export interface HeadlessRunResult {
   ok: boolean;
@@ -72,7 +73,7 @@ export function isRateLimitSignal(text: string): boolean {
     lower.includes("rate_limit") ||
     lower.includes("usage limit") ||
     lower.includes("temporarily limiting requests") ||
-    lower.includes("429") ||
+    HTTP_429_RE.test(text) ||
     (lower.includes("quota") && lower.includes("exceeded"))
   );
 }

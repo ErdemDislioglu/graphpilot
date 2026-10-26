@@ -155,7 +155,7 @@ describe("runNodeHeadlessWithRetry — mock spawner + mock sleep", () => {
       AGENT_DEF,
       ROUTE,
       { enabled: false, waitSeconds: 1, maxRetries: 3 },
-      () => ({ stdout: "429", status: 1 }),
+      () => ({ stdout: "429 Too Many Requests", status: 1 }),
       () => {
         throw new Error("sleep çağrılmamalıydı — enabled:false");
       },

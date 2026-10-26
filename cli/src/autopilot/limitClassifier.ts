@@ -45,8 +45,15 @@ const RATE_LIMIT_PATTERNS = [
   "server is temporarily limiting requests",
   "rate limit",
   "rate_limit",
-  "429",
 ];
+
+/**
+ * HTTP 429 — yalnız bağlamıyla ("429 Too Many Requests", "status: 429", "HTTP 429",
+ * "error 429"). Pilotta çıplak `"429"` araması `claude -p --output-format json`
+ * çıktısındaki sayılarla (ör. `"duration_ms":14291`) eşleşti: gerçek görev hatası
+ * limit sanıldı ve görev saatlerce bekleme/yeniden deneme döngüsünde kaldı.
+ */
+export const HTTP_429_RE = /\b429\s+too many requests|\b(?:status(?:_?code)?|http|error)\W{0,3}429\b/i;
 
 const RESET_TIME_RE = /\b(\d{1,2}:\d{2}\s?(?:am|pm)?)\b/i;
 
@@ -62,6 +69,8 @@ export function classifyLimitError(text: string): LimitClassification {
   for (const p of RATE_LIMIT_PATTERNS) {
     if (lower.includes(p)) return withResetHint({ kind: "rate_limit", matchedText: p }, text);
   }
+  const http429 = text.match(HTTP_429_RE);
+  if (http429) return withResetHint({ kind: "rate_limit", matchedText: http429[0].toLowerCase() }, text);
   return { kind: null };
 }
 

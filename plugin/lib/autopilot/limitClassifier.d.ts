@@ -18,4 +18,11 @@ export interface LimitClassification {
     /** Metinde bulunabilirse sıfırlanma zamanı/süresi hakkında ham ipucu (ör. "3:14am"). */
     resetHint?: string;
 }
+/**
+ * HTTP 429 — yalnız bağlamıyla ("429 Too Many Requests", "status: 429", "HTTP 429",
+ * "error 429"). Pilotta çıplak `"429"` araması `claude -p --output-format json`
+ * çıktısındaki sayılarla (ör. `"duration_ms":14291`) eşleşti: gerçek görev hatası
+ * limit sanıldı ve görev saatlerce bekleme/yeniden deneme döngüsünde kaldı.
+ */
+export declare const HTTP_429_RE: RegExp;
 export declare function classifyLimitError(text: string): LimitClassification;

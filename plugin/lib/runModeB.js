@@ -1,4 +1,5 @@
 import { execSync, spawnSync } from "node:child_process";
+import { HTTP_429_RE } from "./autopilot/limitClassifier.js";
 const defaultSpawner = (args) => {
     const result = spawnSync("claude", args, { encoding: "utf-8" });
     return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
@@ -46,7 +47,7 @@ export function isRateLimitSignal(text) {
         lower.includes("rate_limit") ||
         lower.includes("usage limit") ||
         lower.includes("temporarily limiting requests") ||
-        lower.includes("429") ||
+        HTTP_429_RE.test(text) ||
         (lower.includes("quota") && lower.includes("exceeded")));
 }
 /**
