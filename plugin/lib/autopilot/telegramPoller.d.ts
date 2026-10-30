@@ -15,6 +15,9 @@ export declare class TelegramPoller {
     private offset;
     private readonly pending;
     private readonly answeredCallbackIds;
+    /** `registerAsk`'tan ÖNCE gelen buton cevapları (soru arka planda gönderilirken poll
+     * araya girebilir) — eskiden düşürülüyordu, soru bir daha cevaplanamıyordu. */
+    private readonly earlyAnswers;
     private onCommand?;
     constructor(client: TelegramClient, allowedChatId: number | string, 
     /** Faz 12.13 — `getUpdates` ağ hatası (ör. "fetch failed") buraya gider, döngüyü düşürmez. */

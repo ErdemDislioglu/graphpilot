@@ -13,6 +13,9 @@ export class TelegramPoller {
     offset = 0;
     pending = new Map();
     answeredCallbackIds = new Set();
+    /** `registerAsk`'tan ÖNCE gelen buton cevapları (soru arka planda gönderilirken poll
+     * araya girebilir) — eskiden düşürülüyordu, soru bir daha cevaplanamıyordu. */
+    earlyAnswers = new Map();
     onCommand;
     constructor(client, allowedChatId, 
     /** Faz 12.13 — `getUpdates` ağ hatası (ör. "fetch failed") buraya gider, döngüyü düşürmez. */
@@ -23,6 +26,11 @@ export class TelegramPoller {
     }
     /** `TelegramNotifier.ask()` tarafından çağrılır — ilgili mesajın buton cevabını bekleyen bir Promise döner. */
     registerAsk(messageId) {
+        const early = this.earlyAnswers.get(messageId);
+        if (early !== undefined) {
+            this.earlyAnswers.delete(messageId);
+            return Promise.resolve(early);
+        }
         return new Promise((resolve) => {
             this.pending.set(messageId, resolve);
         });
@@ -66,12 +74,23 @@ export class TelegramPoller {
         // tamamen yok say.
         if (this.answeredCallbackIds.has(cb.id))
             return;
-        const waiter = this.pending.get(cb.message.message_id);
-        if (!waiter || cb.data === undefined)
+        if (cb.data === undefined)
             return;
+        const waiter = this.pending.get(cb.message.message_id);
+        if (!waiter) {
+            // Bekleyen yok: ya soru henüz kaydolmadı (yarış) ya da eski bir mesaj (ör. süreç
+            // yeniden başladı). İlki için sakla; tampon sınırlı — eski mesajlar birikip şişirmesin.
+            if (this.earlyAnswers.size >= 50)
+                this.earlyAnswers.delete(this.earlyAnswers.keys().next().value);
+            this.earlyAnswers.set(cb.message.message_id, cb.data);
+            return;
+        }
         this.answeredCallbackIds.add(cb.id);
         this.pending.delete(cb.message.message_id);
-        void this.client.answerCallbackQuery(cb.id);
+        // Yalnız butonun "yükleniyor" göstergesini kapatır — karar zaten alındı. Hata (ör. geç
+        // poll'da "query is too old") yakalanmazsa unhandled rejection süreci öldürüyordu (pilot:
+        // "Onayla"dan sonra otopilot kapandı, görev hiç başlamadı).
+        this.client.answerCallbackQuery(cb.id).catch((err) => this.onError(err));
         waiter(cb.data);
     }
     handleMessage(msg) {

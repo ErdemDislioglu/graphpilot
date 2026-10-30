@@ -155,3 +155,51 @@ describe("TelegramPoller — ağ hatası (Faz 12.13)", () => {
     expect(JSON.parse(fetchFn.mock.calls[1][1].body).offset).toBe(0);
   });
 });
+
+describe("TelegramPoller — answerCallbackQuery hatası", () => {
+  it("'query is too old' süreci düşürmez: karar yine iletilir, hata onError'a gider", async () => {
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/answerCallbackQuery")) {
+        return {
+          json: async () => ({
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: query is too old and response timeout expired or query ID is invalid",
+          }),
+        };
+      }
+      return {
+        json: async () => ({
+          ok: true,
+          result: [{ update_id: 1, callback_query: { id: "cb-1", data: "approve", message: { message_id: 42, chat: { id: 7 } } } }],
+        }),
+      };
+    });
+    const errors: unknown[] = [];
+    const poller = new TelegramPoller(new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch), 7, (e) => errors.push(e));
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const answer = poller.registerAsk(42);
+      await poller.pollOnce();
+      expect(await answer).toBe("approve");
+      await new Promise((r) => setTimeout(r, 10));
+      expect(unhandled).toEqual([]);
+      expect(String(errors[0])).toContain("query is too old");
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+});
+
+describe("TelegramPoller — registerAsk'tan önce gelen cevap", () => {
+  it("cevap kayıttan önce gelirse saklanır, registerAsk onu hemen döner (eskiden düşürülüyordu)", async () => {
+    const client = clientReturning([
+      { update_id: 1, callback_query: { id: "cb-1", data: "opt:1", from: { id: 1 }, message: { message_id: 42, chat: { id: 7 } } } },
+    ]);
+    const poller = new TelegramPoller(client, 7);
+    await poller.pollOnce();
+    expect(await poller.registerAsk(42)).toBe("opt:1");
+  });
+});

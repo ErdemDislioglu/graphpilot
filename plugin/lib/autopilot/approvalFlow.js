@@ -84,7 +84,9 @@ export async function requestApproval(opts) {
             lastError: opts.lastError,
         });
     const timeoutMs = config.autopilot.approvals.timeout_minutes * 60_000;
-    const askPromise = notifier.ask(msg.text, msg.buttons ?? []);
+    // Soru hiç gönderilemezse (ağ, ~10 dk yeniden deneme sonrası) süreç çökmesin: cevap
+    // gelmemiş sayılır, `timeout_action` uygulanır.
+    const askPromise = notifier.ask(msg.text, msg.buttons ?? []).catch(() => new Promise(() => { }));
     const result = await waitForAnswer(askPromise, timeoutMs, sleep, opts.poll, opts.pollIntervalMs);
     const timedOut = result === TIMEOUT_SENTINEL;
     const decision = timedOut

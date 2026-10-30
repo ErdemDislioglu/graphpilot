@@ -312,6 +312,9 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
   // `ask()` arka planda bekler, cevap her turun başında `pollOnce` sonrası uygulanır.
   const blockedAsks = new Map<string, { question?: AgentQuestion; answer?: string }>();
   const pollForApproval = () => poller.pollOnce(0);
+  // Onay beklerken buton cevabı hızlı işlensin (varsayılan 15 sn'de Telegram callback'i
+  // "query is too old" diye reddediyordu) — boşta bekleme döngüsüyle aynı aralık.
+  const approvalPollMs = opts.pollIntervalMs ?? 2_000;
 
   poller.onCommandMessage((_chatId, command, args) => {
     switch (command) {
@@ -441,7 +444,7 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
           kind: "risk",
           sleep,
           poll: pollForApproval,
-          pollIntervalMs: opts.pollIntervalMs,
+          pollIntervalMs: approvalPollMs,
         });
         if (approval.decision === "stop") return { processedCount, stopReason: "user_stop" };
         continue;
@@ -536,7 +539,7 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
         lastError: lastErrorLine(failedTask),
         sleep,
         poll: pollForApproval,
-        pollIntervalMs: opts.pollIntervalMs,
+        pollIntervalMs: approvalPollMs,
       });
       if (outcome.decision === "stop") return { processedCount, stopReason: "user_stop" };
       idleWaitingNoticeSent = false;
