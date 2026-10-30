@@ -20,6 +20,16 @@ export declare function buildHeadlessArgs(contextMarkdown: string, agentDef: Age
     model: string;
     max_turns: number;
 }): string[];
+/**
+ * Faz 15 — headless oturumun sabit yükü. `--allowedTools` yalnız izin sormayı kaldırır,
+ * araç listesini KISITLAMAZ: kullanıcının tüm MCP sunucuları ve skill listesi her
+ * `claude -p` oturumuna yükleniyordu (plannerApp: prompt ~3k token iken ilk tur ~30k).
+ * `--tools` yalnız agent'ın araçlarını bırakır, `--strict-mcp-config` (`--mcp-config`
+ * verilmeden) MCP sunucularını, `--disable-slash-commands` skill listesini kapatır.
+ * `--bare` değil: hook'ları da kapatır (ADR-001). Kaynak: `claude --help` (2.1.314);
+ * token kazancı DOĞRULANMADI — bench ile ölçülecek.
+ */
+export declare function minimalSessionArgs(tools: string): string[];
 export declare function runNodeHeadless(contextMarkdown: string, agentDef: AgentDefinition, route: {
     model: string;
     max_turns: number;

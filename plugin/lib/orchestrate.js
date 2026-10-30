@@ -1,5 +1,5 @@
-import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { join, relative } from "node:path";
+import { closeSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { parseGraph } from "./graph/parser.js";
 import { getDependsOn, tasksOf } from "./graph/types.js";
@@ -15,7 +15,15 @@ import { writeRepoMap } from "./repomap.js";
 import { validateGraph } from "./validate.js";
 import { runChecks, runVerify } from "./checks.js";
 import { extractAcceptanceCriteria, readGitDiff, runAcceptanceCheck } from "./check.js";
-import { computeFixLoopStatus, readFixLoopRounds, recordFixLoopRound } from "./fixLoop.js";
+import { computeFixLoopStatus, markFixLoopReset, readCurrentAttemptRounds, recordFixLoopRound } from "./fixLoop.js";
+import { computeNext, touchesConflict } from "./next.js";
+import { matchesAnyTouches } from "./hooks/touchesGuard.js";
+import { escalateNode } from "./escalate.js";
+import { escalateTeamNode } from "./team/teamEscalate.js";
+import { failNode } from "./fail.js";
+import { findExpandCandidates } from "./expandCandidates.js";
+import { checkoutBranch, epicBranchName, pushCurrentBranch } from "./autopilot/epicRun.js";
+import { epicDoneMessage } from "./autopilot/messages.js";
 const defaultGitRunner = (args, cwd) => {
     const result = spawnSync("git", args, { cwd, encoding: "utf-8" });
     return { stdout: result.stdout ?? "", status: result.error ? null : result.status };
@@ -106,9 +114,11 @@ export function startTasks(graphRoot, ids, config, opts) {
             throw new Error(`${id}: ${result.errors.join("; ")}`);
     }
     const git = opts.git ?? defaultGitRunner;
-    const head = git(["rev-parse", "--verify", "--quiet", "HEAD"], opts.projectRoot);
     const inside = git(["rev-parse", "--is-inside-work-tree"], opts.projectRoot);
     const repo = inside.status === 0 && inside.stdout.trim() === "true";
+    if (repo && config.workflow.branch_per_epic)
+        switchToEpicBranch(graphRoot, ids, opts.projectRoot, git);
+    const head = git(["rev-parse", "--verify", "--quiet", "HEAD"], opts.projectRoot);
     const rank = (m) => MODEL_RANK.indexOf(m);
     const model = tasks.map((t) => t.model).reduce((a, b) => (rank(b) > rank(a) ? b : a));
     const agent = tasks.some((t) => t.agent === "senior")
@@ -164,7 +174,7 @@ export function gateTask(graphRoot, id, config, opts) {
         }
     }
     recordFixLoopRound(graphRoot, id, { round: opts.round, issuesCount: issues.length });
-    const status = computeFixLoopStatus(readFixLoopRounds(graphRoot, id), {
+    const status = computeFixLoopStatus(readCurrentAttemptRounds(graphRoot, id), {
         maxRounds: config.fix_loop.max_rounds,
         nodeBudget: typeof node.frontmatter.context_budget === "number" ? node.frontmatter.context_budget : undefined,
         breakIfNoProgress: config.fix_loop.break_if_no_progress,
@@ -197,10 +207,12 @@ export function finishTask(graphRoot, id, config, opts) {
         epicDone: false,
         repomap: false,
         committed: false,
+        left: [],
+        pushed: null,
     });
     // Son `gp gate` turu eksik bildirdiyse bitirilmez (duman testinde `fix` kararı yok
     // sayılıp `finish` çağrıldığında görev done oluyordu). Hiç tur yoksa engel yok.
-    const lastRound = readFixLoopRounds(graphRoot, id).at(-1);
+    const lastRound = readCurrentAttemptRounds(graphRoot, id).at(-1);
     if (lastRound && lastRound.issuesCount > 0) {
         return fail([`son doğrulama turu (${lastRound.round}) ${lastRound.issuesCount} eksikle bitti — önce gp gate temiz geçmeli`]);
     }
@@ -221,17 +233,235 @@ export function finishTask(graphRoot, id, config, opts) {
         writeRepoMap(opts.projectRoot, graphRoot);
     rmSync(join(graphRoot, "_runtime", `${id}.context.md`), { force: true });
     const git = opts.git ?? defaultGitRunner;
-    let committed = false;
-    const inside = git(["rev-parse", "--is-inside-work-tree"], opts.projectRoot);
-    if (inside.status === 0 && inside.stdout.trim() === "true") {
-        if (opts.base)
-            git(["reset", "--soft", opts.base], opts.projectRoot);
-        git(["add", "-A"], opts.projectRoot);
-        const staged = git(["diff", "--cached", "--quiet"], opts.projectRoot);
-        if (staged.status === 1) {
-            const summary = String(node.frontmatter.summary ?? "");
-            committed = git(["commit", "-q", "-m", `gp(${id}): ${summary}`], opts.projectRoot).status === 0;
+    const { committed, left } = commitTask(graphRoot, id, { ...opts, git });
+    const pushed = epicDone && config.workflow.push_on_epic_done && committed ? pushCurrentBranch(opts.projectRoot, git) : null;
+    return { ok: true, errors: [], rollup, epicDone, repomap, committed, left, pushed };
+}
+/** `git status --porcelain=v1 -z` çıktısındaki yollar (yeniden adlandırmada iki yol da). */
+export function parsePorcelainZ(out) {
+    const parts = out.split("\0").filter(Boolean);
+    const paths = [];
+    for (let i = 0; i < parts.length; i++) {
+        const code = parts[i].slice(0, 2);
+        paths.push(parts[i].slice(3));
+        if (code.includes("R") || code.includes("C"))
+            paths.push(parts[++i]);
+    }
+    return paths;
+}
+/**
+ * Faz 15 — paralel görevlerde commit karışması. Eskiden `reset --soft <base>` + `add -A`:
+ * önce biten görev diğerinin yarım dosyalarını kendi commit'ine alıyor, sonra biten görev
+ * `reset --soft` ile öncekinin commit'ini yutuyordu. Artık (1) `base..HEAD`'deki commit'lerin
+ * HEPSİ bu görevin `gp-wip`'iyse squash edilir; (2) başka `running` görev varsa onun
+ * `touches`'ına ve düğüm dosyasına uyan değişiklikler bu commit'e alınmaz (`left`).
+ * `siblings`: aynı agent'ın zincirdeki diğer görevleri — "başka görev" sayılmaz.
+ */
+export function commitTask(graphRoot, id, opts) {
+    const { git, projectRoot } = opts;
+    const inside = git(["rev-parse", "--is-inside-work-tree"], projectRoot);
+    if (inside.status !== 0 || inside.stdout.trim() !== "true")
+        return { committed: false, left: [] };
+    if (opts.base) {
+        const log = git(["log", "--format=%s", `${opts.base}..HEAD`], projectRoot);
+        const subjects = log.stdout.split("\n").filter(Boolean);
+        if (log.status === 0 && subjects.every((s) => s.startsWith(`gp-wip(${id})`))) {
+            git(["reset", "--soft", opts.base], projectRoot);
         }
     }
-    return { ok: true, errors: [], rollup, epicDone, repomap, committed };
+    const graph = parseGraph(graphRoot);
+    const own = new Set([id, ...(opts.siblings ?? [])]);
+    const foreign = tasksOf(graph)
+        .filter((t) => t.frontmatter.status === "running" && !own.has(t.id))
+        .flatMap((t) => [...strings(t.frontmatter.touches), relative(projectRoot, t.filePath)]);
+    let left = [];
+    if (foreign.length === 0) {
+        git(["add", "-A"], projectRoot);
+    }
+    else {
+        const prefix = git(["rev-parse", "--show-prefix"], projectRoot).stdout.trim();
+        const changed = parsePorcelainZ(git(["status", "--porcelain=v1", "-z", "--untracked-files=all"], projectRoot).stdout)
+            .filter((p) => p.startsWith(prefix))
+            .map((p) => p.slice(prefix.length));
+        left = changed.filter((p) => matchesAnyTouches(p, foreign));
+        const mine = changed.filter((p) => !matchesAnyTouches(p, foreign));
+        if (mine.length > 0)
+            git(["add", "-A", "--", ...mine], projectRoot);
+    }
+    if (git(["diff", "--cached", "--quiet"], projectRoot).status !== 1)
+        return { committed: false, left };
+    const summary = String(graph.nodesById.get(id)?.frontmatter.summary ?? "");
+    return { committed: git(["commit", "-q", "-m", `gp(${id}): ${summary}`], projectRoot).status === 0, left };
+}
+/**
+ * Faz 15 — `workflow.branch_per_epic`: epic'in ilk görevi başlarken `feature/<epic>` dalına
+ * geçer. Başka bir görev `running` iken dal DEĞİŞTİRİLMEZ (aynı çalışma ağacındaki diğer
+ * agent'ın dosyaları altından kayar) — o durumda mevcut dalda devam edilir.
+ */
+function switchToEpicBranch(graphRoot, ids, projectRoot, git) {
+    const graph = parseGraph(graphRoot);
+    const epicId = graph.nodesById.get(ids[0])?.epicId;
+    const epic = epicId ? graph.nodesById.get(epicId) : undefined;
+    if (!epic)
+        return;
+    const othersRunning = tasksOf(graph).some((t) => t.frontmatter.status === "running" && !ids.includes(t.id));
+    if (!othersRunning)
+        checkoutBranch(projectRoot, epicBranchName(epic), git);
+}
+/**
+ * Faz 15 — `gp complete <id...>`: her görev için doğrulama turu (`gate`, tur numarası
+ * otomatik) + geçtiyse `finish` + yakınsamadıysa yükseltme/kuyruğa geri koyma ya da
+ * `fail`. Eskiden agent dönüşü başına ana thread 2–3 ayrı komut ve karar turu atıyordu;
+ * şimdi bunu worker'ın kendisi tek komutla yapar. Verilen ID'ler birbirinin "siblings"idir
+ * (zincir) — birbirinin dosyasını `left`'e itmez.
+ */
+export function completeTasks(graphRoot, ids, config, opts) {
+    const result = { done: [], fix: [], requeued: [], failed: [], errors: [], epicsDone: [], left: [] };
+    for (const id of ids) {
+        const node = parseGraph(graphRoot).nodesById.get(id);
+        if (!node || node.kind !== "task")
+            throw new Error(`task bulunamadı: ${id}`);
+        if (node.frontmatter.status !== "running") {
+            result.errors.push({ id, errors: [`durum '${String(node.frontmatter.status)}', running değil`] });
+            continue;
+        }
+        const round = (readCurrentAttemptRounds(graphRoot, id).at(-1)?.round ?? 0) + 1;
+        const gate = gateTask(graphRoot, id, config, { ...opts, round });
+        if (gate.decision === "fix") {
+            result.fix.push({ id, round, issues: gate.issues });
+        }
+        else if (gate.decision === "done") {
+            const fin = finishTask(graphRoot, id, config, { ...opts, siblings: ids });
+            if (!fin.ok) {
+                result.errors.push({ id, errors: fin.errors });
+                continue;
+            }
+            result.done.push({ id, committed: fin.committed, unverified: gate.unverified });
+            result.left.push(...fin.left.filter((p) => !result.left.includes(p)));
+            if (fin.epicDone && node.epicId && !result.epicsDone.includes(node.epicId))
+                result.epicsDone.push(node.epicId);
+        }
+        else {
+            const graph = parseGraph(graphRoot);
+            const esc = config.team.enabled ? escalateTeamNode(graph, id, config) : escalateNode(graph, id, config);
+            if (esc.escalated) {
+                markFixLoopReset(graphRoot, id);
+                setFrontmatter(parseGraph(graphRoot), id, { status: "pending" });
+                const route = routeFor(parseGraph(graphRoot).nodesById.get(id), config);
+                result.requeued.push({ id, agent: route.agent, model: route.model });
+            }
+            else {
+                const reason = `${gate.reason}; ${esc.reason ?? "yükseltilemedi"}`;
+                failNode(parseGraph(graphRoot), id, reason);
+                result.failed.push({ id, reason });
+            }
+        }
+    }
+    return result;
+}
+const CLAIM_LOCK_STALE_MS = 30_000;
+/**
+ * `gp claim` aynı anda birden çok worker'dan çağrılır: `_runtime/claim.lock` O_EXCL ile
+ * alınır (iki worker aynı görevi almasın). 30 sn'den eski kilit ölü sayılır.
+ */
+export function withClaimLock(graphRoot, fn, opts = {}) {
+    const dir = join(graphRoot, "_runtime");
+    mkdirSync(dir, { recursive: true });
+    const lock = join(dir, "claim.lock");
+    const deadline = Date.now() + (opts.timeoutMs ?? 10_000);
+    for (;;) {
+        try {
+            closeSync(openSync(lock, "wx"));
+            break;
+        }
+        catch {
+            try {
+                if (Date.now() - statSync(lock).mtimeMs > CLAIM_LOCK_STALE_MS)
+                    rmSync(lock, { force: true });
+            }
+            catch {
+                // kilit bu arada kalktı — tekrar dene
+            }
+            if (Date.now() > deadline)
+                throw new Error("claim kilidi alınamadı (başka bir gp claim takılı olabilir)");
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        }
+    }
+    try {
+        return fn();
+    }
+    finally {
+        rmSync(lock, { force: true });
+    }
+}
+/**
+ * Faz 15 — worker modu: `gp claim --agent <a> --model <m>`. Hazır görevlerden rotası
+ * (`gp route`/ekip ataması) bu worker'a düşen, `running` görevlerle dosya (`touches`)
+ * çakışması olmayan ilkini (feature_agent açıksa zinciriyle) `gp start` eder.
+ */
+export function claimTasks(graphRoot, config, opts) {
+    return withClaimLock(graphRoot, () => {
+        const graph = parseGraph(graphRoot);
+        const mine = (n) => {
+            const r = routeFor(n, config);
+            return r.agent === opts.agent && r.model === opts.model;
+        };
+        const busy = tasksOf(graph)
+            .filter((t) => t.frontmatter.status === "running")
+            .map((t) => strings(t.frontmatter.touches));
+        const ready = computeNext(graph).ready.filter(mine);
+        const pick = ready.find((n) => !busy.some((b) => touchesConflict(strings(n.frontmatter.touches), b)));
+        const waiting = tasksOf(graph).filter((t) => t.frontmatter.status === "pending" && mine(t)).length - (pick ? 1 : 0);
+        if (!pick)
+            return { claimed: null, waiting };
+        const ids = computeChain(graph, pick.id, config).filter((id) => mine(graph.nodesById.get(id)));
+        return { claimed: startTasks(graphRoot, ids, config, opts), waiting: waiting - (ids.length - 1) };
+    });
+}
+/**
+ * Faz 15 — `gp workers`: ana thread'in tek kararı. Hazır görevleri rotaya göre gruplar;
+ * çalışan görev sayısı `parallelism`'i dolduruyorsa yeni worker önermez. Worker'lar
+ * kendi rotalarındaki işi `gp claim` ile çeker, ana thread görev görmez.
+ */
+export function planWorkers(graphRoot, config) {
+    const graph = parseGraph(graphRoot);
+    const running = tasksOf(graph).filter((t) => t.frontmatter.status === "running").length;
+    const slots = new Map();
+    for (const node of computeNext(graph).ready) {
+        const r = routeFor(node, config);
+        const key = `${r.agent}/${r.model}`;
+        const slot = slots.get(key) ?? { agent: r.agent, model: r.model, ready: 0 };
+        slot.ready += 1;
+        slots.set(key, slot);
+    }
+    const free = Math.max(0, config.parallelism - running);
+    const launch = [...slots.values()].sort((a, b) => b.ready - a.ready).slice(0, free);
+    const expand = findExpandCandidates(graph).map((c) => c.id);
+    return { launch, running, expand, finished: slots.size === 0 && running === 0 && expand.length === 0 };
+}
+/**
+ * Faz 15 — `workflow.notify_epic_done`: Mod A'da epic bitince Telegram'a kısa özet. Ağ hatası
+ * görevi bozmaz (bildirim yan iş) — gönderilemeyen sayısı döner. `send` testte sahte.
+ */
+export async function notifyEpicsDone(graphRoot, epicIds, config, send) {
+    const graph = parseGraph(graphRoot);
+    let sent = 0;
+    let failed = 0;
+    for (const epicId of epicIds) {
+        const epic = graph.nodesById.get(epicId);
+        const text = epicDoneMessage(config.autopilot.language, {
+            epicId,
+            epicTitle: epic?.name ?? epicId,
+            taskCount: tasksOf(graph).filter((t) => t.epicId === epicId).length,
+            tokens: 0,
+        }).text;
+        try {
+            await send(text);
+            sent += 1;
+        }
+        catch {
+            failed += 1;
+        }
+    }
+    return { sent, failed };
 }

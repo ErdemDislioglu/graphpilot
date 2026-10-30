@@ -17,3 +17,4 @@ export interface NextResult {
 export declare function computeNext(graph: Graph, opts?: {
     limit?: number;
 }): NextResult;
+export declare function touchesConflict(a: string[], b: string[]): boolean;

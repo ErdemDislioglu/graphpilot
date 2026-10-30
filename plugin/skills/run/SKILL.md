@@ -17,6 +17,7 @@ argument-hint: "[--epic <id>] [--max-nodes N] [--dry-run]"
 > **yalnız gerektiğinde** oku.
 
 `gp` = `node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js"` · `<kök>` = proje kökü. Her komuta `--json` ekle.
+Her `gp` komutu `-p <kök>` alır; proje kökünde çalışıyorsan vermen gerekmez.
 
 ## 0. Başlangıç (bir kez)
 - Parametreler: `--epic <id>` (yalnız o epic'in task'ları), `--max-nodes N`, `--dry-run`
@@ -28,7 +29,30 @@ argument-hint: "[--epic <id>] [--max-nodes N] [--dry-run]"
   "Git'siz devam (geri alma yok; doğrulama `verify:` komutlarıyla)". Repo ise ağaç temiz
   değilse commit/stash öner. Git'siz modda aşağıdaki tüm `git` adımlarını atla.
 
-## 1. Döngü
+## 1W. Worker modu (`efficiency.worker_mode: true`, varsayılan — Faz 15)
+Görevleri sen dağıtmazsın; worker'lar kendileri çeker. Döngü:
+1. `gp workers` → `finished: true` ise §Bitirme. `expand` doluysa ve `launch` boşsa
+   §Genişletme. `launch`'taki her `{agent, model}` için bir worker'ı **aynı mesajda**
+   Agent çağrısı olarak başlat (`subagent_type: <agent>`, `model: <model>`, prompt aşağıda).
+   `expand` doluysa planner'ı da aynı mesajda başlat. Sonra bekle — yoklama yapma.
+2. Bir worker döndüğünde: `failed:`/`bulgu:` satırlarını bitirme özeti için not al,
+   `gp workers` ile 1'e dön (çalışan worker varsa ve `launch` boşsa yalnız bekle).
+
+Worker prompt'u:
+```
+WORKER modu. Rolün: <agent>/<model>. gp = node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" (her komuta --json)
+En fazla <efficiency.worker_max_tasks> görev yap, sonra dur:
+1. gp claim --agent <agent> --model <model> -p <kök>. "claimed": null ise dur.
+2. Dönen tasks[].contextPath dosyalarını Read ile oku; görev(ler)i sırayla uygula,
+   her biri için kendi düğüm dosyasındaki ## Handoff'u doldur (≤250 token).
+3. gp complete <tüm claim edilen id'ler> -p <kök>.
+   "fix" doluysa YALNIZ o eksikleri düzelt ve 3'ü tekrarla. "errors" doluysa (ör. Handoff yok)
+   düzelt ve 3'ü tekrarla. "requeued"/"failed" görevleri bırak.
+4. 1'e dön.
+Dönüşün YALNIZ: "done: <id,…>" ve varsa "failed: <id> <neden>", "bulgu: <tek satır>".
+```
+
+## 1. Döngü (`efficiency.worker_mode: false` — eski davranış)
 `gp next` →
 - `cycles` doluysa: döngüyü göster, dur.
 - `ready` boşsa: `gp expand-candidates`. Aday varsa §Genişletme; yoksa §Bitirme.
@@ -55,26 +79,17 @@ argument-hint: "[--epic <id>] [--max-nodes N] [--dry-run]"
   Handoff'u ya da yaptığın işi rapora tekrar yazma.
   ```
 
-## 3. Doğrulama (her task için, N = 1'den)
-`gp gate <id> --round N -p <kök>` → `decision`:
-- `fix` → aynı agent'ı **yalnız `issues` listesiyle** tekrar çağır (bağlamı yeniden verme);
-  git varsa `git add -A && git commit -qm "gp-wip(<id>): tur N"`; `N += 1`, tekrarla.
-- `done` → §4. `unverified: true` ise bitirme özetinde "doğrulanmadı" diye listele.
-- `escalate` → §5.
-Zincirde görevleri sırayla doğrula; biri `escalate` olursa kalanları `gp set <id> status=pending`.
-
-## 4. Bitiş
-`gp finish <id> -p <kök> [--base <git.base>]` (done + roll-up + indeks + repo-map + tek commit).
-- `ok: false` ve hata Handoff ise: aynı agent'ı **bir kez**, haiku ile, yalnız "## Handoff'u
-  doldur" talebiyle çağır, `gp finish`'i tekrarla; yine olmazsa §5.
-- Agent "bulgu" bildirdiyse kullanıcıya bitirme özetinde göster (ekip modunda `/gp:team` §6).
+## 3. Doğrulama ve bitiş (tek komut — Faz 15)
+`gp complete <id…> -p <kök>` (tur no otomatik; geçen görev done + roll-up + indeks + commit):
+- `fix` doluysa → aynı agent'ı **yalnız bu `issues` listesiyle** tekrar çağır, sonra tekrar `gp complete`.
+- `errors` (ör. Handoff yok) → aynı agent'a **bir kez** yalnız o hatayı ver, tekrar `gp complete`.
+- `requeued` → görev üst model/role yükseltildi ve kuyrukta; döngü onu yeniden başlatır.
+- `failed` → git varsa `git restore -- <görevin touches>` (git'siz modda değişiklik kalır —
+  kullanıcıya söyle); bitirme özetinde listele.
+- `done[].unverified: true` olanları bitirme özetinde "doğrulanmadı" diye listele.
+- Agent "bulgu" bildirdiyse bitirme özetinde göster (ekip modunda `/gp:team` §6).
 - Bilgi düğümünü agent kendisi günceller (O10). Handoff birden çok bilgi düğümünün
   değişmesi gerektiğini söylüyor ama agent güncellemediyse `docs` agent'ını (haiku) çağır.
-
-## 5. Hata politikası
-`gp escalate <id>` → `escalated: true`: `gp start <id> -p <kök>` ile yeni modelle §2'ye dön
-(fix-loop sayacı sıfırlanmaz). `false`: `gp fail <id> --reason "<kısa>"`; git varsa
-`git restore .` (git'siz modda değişiklik kalır — kullanıcıya söyle); döngüye dön.
 
 ## Genişletme (planner'ı doğrudan çağır — `/gp:expand`'i invoke etme)
 Aday `epic` → `MOD: GENİŞLETME-FEATURE`, `feature` → `MOD: GENİŞLETME-TASK`.

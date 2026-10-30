@@ -55,6 +55,8 @@ describe("runAcceptanceCheck — mock spawner", () => {
     expect(capturedArgs).toContain("--model");
     expect(capturedArgs).toContain("haiku");
     expect(capturedArgs).toContain("--json-schema");
+    expect(capturedArgs).toContain("--strict-mcp-config");
+    expect(capturedArgs).toContain("--disable-slash-commands");
   });
 
   it("boş results dizisi de geçerli bir başarı sayılır (tüm kriterler kontrol edildi, 0 kriter değil)", () => {

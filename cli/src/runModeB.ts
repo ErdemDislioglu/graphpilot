@@ -40,9 +40,27 @@ export function buildHeadlessArgs(
     agentDef.systemPrompt,
     "--allowedTools",
     agentDef.tools,
+    ...minimalSessionArgs(agentDef.tools),
     "--output-format",
     "json",
   ];
+}
+
+/**
+ * Faz 15 — headless oturumun sabit yükü. `--allowedTools` yalnız izin sormayı kaldırır,
+ * araç listesini KISITLAMAZ: kullanıcının tüm MCP sunucuları ve skill listesi her
+ * `claude -p` oturumuna yükleniyordu (plannerApp: prompt ~3k token iken ilk tur ~30k).
+ * `--tools` yalnız agent'ın araçlarını bırakır, `--strict-mcp-config` (`--mcp-config`
+ * verilmeden) MCP sunucularını, `--disable-slash-commands` skill listesini kapatır.
+ * `--bare` değil: hook'ları da kapatır (ADR-001). Kaynak: `claude --help` (2.1.314);
+ * token kazancı DOĞRULANMADI — bench ile ölçülecek.
+ */
+export function minimalSessionArgs(tools: string): string[] {
+  const list = tools
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .join(",");
+  return ["--tools", list, "--strict-mcp-config", "--disable-slash-commands"];
 }
 
 export function runNodeHeadless(

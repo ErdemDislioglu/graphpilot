@@ -34,3 +34,11 @@ export interface FixLoopTokenRatio {
  * "sadece eksik listesi gönder" ilkesinin (6.3) işe yaradığının kanıtıdır.
  */
 export declare function computeFixLoopTokenRatio(rounds: FixLoopRound[]): FixLoopTokenRatio;
+/**
+ * Faz 15 — escalate sonrası yeni model/rol tur sınırını baştan kullanabilsin diye işaret.
+ * Eskiden sayaç sıfırlanmıyordu: 3 turu tüketmiş görev üst modele geçince ilk eksikte
+ * yeniden yükseltiliyordu. `readFixLoopRounds` (ölçüm) işaretten etkilenmez.
+ */
+export declare function markFixLoopReset(graphRootDir: string, nodeId: string): void;
+/** Son `markFixLoopReset`'ten sonraki turlar — fix-loop frenleri bunlara uygulanır. */
+export declare function readCurrentAttemptRounds(graphRootDir: string, nodeId: string): FixLoopRound[];

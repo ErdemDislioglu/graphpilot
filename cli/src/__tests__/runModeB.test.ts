@@ -28,6 +28,14 @@ describe("buildHeadlessArgs", () => {
     expect(args).toContain("-p");
     expect(args).toContain("context içeriği");
   });
+
+  it("Faz 15: araçları kısıtlar, MCP ve skill listesini kapatır", () => {
+    const args = buildHeadlessArgs("ctx", { tools: "Read, Glob, Bash", systemPrompt: "x" }, ROUTE);
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read,Glob,Bash");
+    expect(args).toContain("--strict-mcp-config");
+    expect(args).toContain("--disable-slash-commands");
+    expect(args).not.toContain("--mcp-config");
+  });
 });
 
 describe("runNodeHeadless — mock spawner", () => {

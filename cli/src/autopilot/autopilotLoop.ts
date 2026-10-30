@@ -368,7 +368,7 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
       idleWaitingNoticeSent = false;
       const { graph: g, config: c } = loadFresh(graphRootDir);
       let branchNote = "";
-      if (c.autopilot.git.branch_per_epic) {
+      if (c.autopilot.git.branch_per_epic || c.workflow.branch_per_epic) {
         const branch = epicBranchName(g.nodesById.get(epicId)!);
         const ok = checkoutBranch(opts.projectRoot ?? dirname(graphRootDir), branch, opts.git);
         branchNote = ok ? ` · ${lang === "tr" ? "dal" : "branch"}: ${branch}` : ` · ⚠️ ${branch} açılamadı`;
@@ -515,7 +515,7 @@ async function handleEpicCompletionIfAny(
   emitEvent(opts.graphRootDir, { type: "epic_done", epicId: node.epicId });
   const epicNode = graph.nodesById.get(node.epicId);
   let pushNote = "";
-  if (config.autopilot.git.push_on_epic_done) {
+  if (config.autopilot.git.push_on_epic_done || config.workflow.push_on_epic_done) {
     const projectRoot = opts.projectRoot ?? dirname(opts.graphRootDir);
     // `git.commit: false` iken epic'in tüm işi burada tek commit'e iner; görev başına
     // commit açıksa yalnız kalıntılar (graph metrikleri vb.) girer, yoksa commit atılmaz.

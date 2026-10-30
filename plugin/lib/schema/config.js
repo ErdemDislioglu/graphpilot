@@ -249,6 +249,25 @@ const EfficiencySchema = z
     doc_budget: DocBudgetSchema.default({ task_body: 350, feature_body: 150, epic_body: 150 }),
     /** O19 — `/gp:plan` tahmini görev sayısı bunun altındaysa "plugin'siz daha ucuz olabilir" uyarısı. 0 = kapalı. */
     small_project_warn_tasks: z.number().int().nonnegative().default(6),
+    /**
+     * Faz 15 — worker modu: ana thread görev başına değil worker başına tur atar; worker
+     * `gp claim` → uygula → `gp complete` döngüsünü kendisi çevirir. false = eski döngü.
+     */
+    worker_mode: z.boolean().default(true),
+    /** Bir worker en fazla bu kadar görev (zincir = görev sayısı) alıp çıkar — bağlamı sınırlar. */
+    worker_max_tasks: z.number().int().positive().default(5),
+})
+    .strict();
+/**
+ * Faz 15 — Mod A'da ana thread'in elle yaptığı dal/push/bildirim işleri. Otopilotun
+ * `autopilot.git` ayarlarıyla aynı anlam; ikisinden biri açıksa iki modda da uygulanır.
+ */
+const WorkflowSchema = z
+    .object({
+    branch_per_epic: z.boolean().default(false),
+    push_on_epic_done: z.boolean().default(false),
+    /** Epic bitince Telegram'a kısa özet (`gp autopilot setup` ile kurulu olmalı). */
+    notify_epic_done: z.boolean().default(false),
 })
     .strict();
 export const DEFAULT_EFFICIENCY = EfficiencySchema.parse({});
@@ -301,6 +320,7 @@ export const ConfigSchema = z
         git: { commit: false, branch_per_epic: false, push_on_epic_done: false },
     }),
     efficiency: EfficiencySchema.default(DEFAULT_EFFICIENCY),
+    workflow: WorkflowSchema.default({ branch_per_epic: false, push_on_epic_done: false, notify_epic_done: false }),
     team: TeamSchema.default({
         enabled: true,
         manager: { model: "sonnet", consult_senior_for: ["architecture", "data_model", "security"], autonomy: "balanced" },

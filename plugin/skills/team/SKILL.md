@@ -30,7 +30,11 @@ burada tekrar edilmiyor; `/gp:run`'ı ayrıca invoke etme). Farklı olan SADECE 
 (Junior) / `senior` / `tester` / `docs` döner. Ayrı `team assign` çağrısı gerekmez;
 neden bu role gittiğini görmek istersen `gp team assign <id> --json`.
 
-## 5. Başarısızlık — ekip zinciri (13.5, `/gp:run`'ın "Hata politikası"nın yerine)
+## 5. Başarısızlık — ekip zinciri (13.5)
+
+> Faz 15: `gp complete` ekip modunda bu zinciri kendisi uygular (yükseltilen görev
+> `requeued` olarak kuyruğa döner, zincirin sonu `failed`). Aşağıdaki elle akış yalnız
+> `gp complete` kullanılmadığında ve `failed` görev için kullanıcıya sorarken geçerlidir.
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" team escalate <id> --json

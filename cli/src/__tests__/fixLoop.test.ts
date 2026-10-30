@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   computeFixLoopStatus,
   computeFixLoopTokenRatio,
+  markFixLoopReset,
+  readCurrentAttemptRounds,
   readFixLoopRounds,
   recordFixLoopRound,
 } from "../fixLoop.js";
@@ -30,6 +32,23 @@ describe("recordFixLoopRound + readFixLoopRounds", () => {
     const dir = mkdtempSync(join(tmpdir(), "gp-fixloop-test-"));
     try {
       expect(readFixLoopRounds(dir, "yok")).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("markFixLoopReset + readCurrentAttemptRounds — Faz 15", () => {
+  it("escalate işaretinden sonraki turları verir; ölçüm tüm turları görmeye devam eder", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gp-fixloop-test-"));
+    try {
+      recordFixLoopRound(dir, "T", { round: 1, issuesCount: 2 });
+      recordFixLoopRound(dir, "T", { round: 2, issuesCount: 2 });
+      markFixLoopReset(dir, "T");
+      expect(readCurrentAttemptRounds(dir, "T")).toEqual([]);
+      recordFixLoopRound(dir, "T", { round: 3, issuesCount: 1 });
+      expect(readCurrentAttemptRounds(dir, "T")).toEqual([{ round: 3, issuesCount: 1, tokens: undefined }]);
+      expect(readFixLoopRounds(dir, "T").map((r) => r.round)).toEqual([1, 2, 3]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

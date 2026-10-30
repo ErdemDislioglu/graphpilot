@@ -73,7 +73,7 @@ function groupByTouchesConflict(tasks: GraphNode[]): GraphNode[][] {
   return groups;
 }
 
-function touchesConflict(a: string[], b: string[]): boolean {
+export function touchesConflict(a: string[], b: string[]): boolean {
   for (const pa of a) {
     const prefixA = literalPrefix(pa);
     for (const pb of b) {

@@ -685,3 +685,23 @@ function epicFrontmatterForTeam(): string {
   const lines = Object.entries(obj).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
   return `---\n${lines.join("\n")}\n---\n## Epic\nx\n`;
 }
+
+describe("Faz 15 — -p her graph komutunda", () => {
+  it("--graph-root alan her komut --project-root da alır", () => {
+    const all = (cmd: ReturnType<typeof buildCli>): ReturnType<typeof buildCli>[] => [cmd, ...cmd.commands.flatMap(all)];
+    const missing = all(buildCli())
+      .filter((c) => c.options.some((o) => o.long === "--graph-root"))
+      .filter((c) => !c.options.some((o) => o.long === "--project-root"))
+      .map((c) => c.name());
+    expect(missing).toEqual([]);
+  });
+
+  it("resume ve config -p ile hata vermez (mini koşuda tur kaybettiren çağrı)", async () => {
+    await withTempGraphAsync({ "config.yml": "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\nbudgets: { default_context: 8000, max_turns: 20 }\n" }, async (_graph, dir) => {
+      await run(["resume", "-g", dir, "-p", dir, "--json"]);
+      await run(["config", "-g", dir, "-p", dir, "--key", "efficiency", "--json"]);
+      expect(errors).toEqual([]);
+      expect(process.exitCode).toBeUndefined();
+    });
+  });
+});

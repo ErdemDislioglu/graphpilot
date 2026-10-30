@@ -222,6 +222,13 @@ describe("ConfigSchema — Faz 14 efficiency (ölçek koruması)", () => {
       feature_agent_max_tasks: 4,
       doc_budget: { task_body: 350, feature_body: 150, epic_body: 150 },
       small_project_warn_tasks: 6,
+      worker_mode: true,
+      worker_max_tasks: 5,
+    });
+    expect(ConfigSchema.parse(BASE).workflow).toEqual({
+      branch_per_epic: false,
+      push_on_epic_done: false,
+      notify_epic_done: false,
     });
   });
 
@@ -235,6 +242,7 @@ describe("ConfigSchema — Faz 14 efficiency (ölçek koruması)", () => {
         expansion_model: "opus",
         feature_agent: false,
         small_project_warn_tasks: 0,
+        worker_mode: false,
       },
     }).efficiency;
     expect(off).toMatchObject({
@@ -244,6 +252,7 @@ describe("ConfigSchema — Faz 14 efficiency (ölçek koruması)", () => {
       expansion_model: "opus",
       feature_agent: false,
       small_project_warn_tasks: 0,
+      worker_mode: false,
     });
     expect(ConfigSchema.safeParse({ ...BASE, efficiency: { yok: 1 } }).success).toBe(false);
   });

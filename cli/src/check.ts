@@ -73,6 +73,10 @@ export function runAcceptanceCheck(
     "json",
     "--json-schema",
     JSON.stringify(ACCEPTANCE_CHECK_SCHEMA),
+    // Faz 15 — kullanıcının MCP sunucuları ve skill listesi bu tek turluk kontrole gerekmez.
+    // `--tools ""` verilmez: `--json-schema`'nın araçsız çalıştığı DOĞRULANMADI.
+    "--strict-mcp-config",
+    "--disable-slash-commands",
     ...(opts.model ? ["--model", opts.model] : []),
   ];
 

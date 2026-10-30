@@ -18,7 +18,18 @@ import { runChecks, runVerify } from "./checks.js";
 import { extractAcceptanceCriteria, readGitDiff, runAcceptanceCheck } from "./check.js";
 import { applyRollup } from "./rollup.js";
 import { applyPlan } from "./apply.js";
-import { computeChain, finishTask, gateTask, refreshGraphState, startTasks } from "./orchestrate.js";
+import {
+  claimTasks,
+  completeTasks,
+  computeChain,
+  finishTask,
+  gateTask,
+  notifyEpicsDone,
+  planWorkers,
+  refreshGraphState,
+  startTasks,
+} from "./orchestrate.js";
+import type { Config } from "./schema/index.js";
 import type { AcceptanceCheckResult } from "./check.js";
 import { escalateNode } from "./escalate.js";
 import { failNode } from "./fail.js";
@@ -156,9 +167,15 @@ export function buildCli(): Command {
     .name("gp")
     .description("GraphPilot — graph üzerindeki deterministik işler. Hiçbir komut LLM çağırmaz.");
 
+  /**
+   * Faz 15 — `-p` her graph komutunda: eskiden yalnız 14 komut kabul ediyordu, ana thread
+   * `-p <kök>`'ü (skill'in öğrettiği biçim) `resume`/`config`'e de verip hata alıyor ve tur
+   * kaybediyordu. Kullanmayan komut için zararsız.
+   */
   function withGraphRoot(cmd: Command): Command {
     return cmd
       .option("-g, --graph-root <path>", "graph kök dizini", "./.graph")
+      .option("-p, --project-root <path>", "proje kökü", ".")
       .option("--json", "makine-okur JSON çıktı");
   }
 
@@ -470,7 +487,6 @@ export function buildCli(): Command {
       ),
   )
     .argument("<id>", "task ID'si")
-    .option("-p, --project-root <path>", "iskelet komutunun çalıştığı kök", ".")
     .action(
       action((id: string, opts: BaseOpts & { projectRoot: string }) => {
         const graph = loadGraph(opts);
@@ -628,7 +644,6 @@ export function buildCli(): Command {
         "Faz 9.1: status:running kalmış düğümleri çöz (devam et / geri al), yetim WIP commit'leri listele",
       ),
   )
-    .option("-p, --project-root <path>", "git komutlarının çalıştığı kök", ".")
     .option("--dry-run", "hiçbir değişiklik yapma, sadece ne yapılacağını göster")
     .action(
       action((opts: BaseOpts & { projectRoot: string; dryRun?: boolean }) => {
@@ -697,7 +712,6 @@ export function buildCli(): Command {
         "Faz 9.3: bilgi düğümlerinin source_files'ı ile gerçek kod arasındaki hash farkını listeler",
       ),
   )
-    .option("-p, --project-root <path>", "source_files'ın göreli olduğu kök", ".")
     .option(
       "--update-hashes",
       "raporlamak yerine TÜM source_files'ın güncel hash'ini kaydet (elle onaydan sonra kullan)",
@@ -765,7 +779,6 @@ export function buildCli(): Command {
         "Katman 1 (sıfır token): config.yml'deki build/lint/test komutlarını çalıştırır",
       ),
   )
-    .option("-p, --project-root <path>", "proje kökü", ".")
     .action(
       action((opts: BaseOpts & { projectRoot: string }) => {
         const config = loadConfig(loadGraph(opts));
@@ -794,7 +807,6 @@ export function buildCli(): Command {
   )
     .argument("<ids...>", "task ID'leri (birden çoksa tek agent'a verilecek sıralı zincir)")
     .option("--chain", "Faz 14 O16: tek ID'yi aynı dosya zincirindeki sıralı görevlerle genişlet")
-    .option("-p, --project-root <path>", "proje kökü (git baseline için)", ".")
     .action(
       action((ids: string[], opts: BaseOpts & { chain?: boolean; projectRoot: string }) => {
         const graph = loadGraph(opts);
@@ -822,7 +834,6 @@ export function buildCli(): Command {
   )
     .argument("<id>", "task ID'si")
     .requiredOption("--round <n>", "tur numarası (1'den başlar)", (v) => Number(v))
-    .option("-p, --project-root <path>", "proje kökü", ".")
     .action(
       action((id: string, opts: BaseOpts & { round: number; projectRoot: string }) => {
         const config = loadConfig(loadGraph(opts));
@@ -848,7 +859,6 @@ export function buildCli(): Command {
       .description("Faz 14 O5: Handoff kontrolü + done + roll-up + indeks + repo-map + git commit"),
   )
     .argument("<id>", "task ID'si")
-    .option("-p, --project-root <path>", "proje kökü", ".")
     .option("--base <sha>", "gp start'ın verdiği git baseline (WIP commit'ler tek commit'e iner)")
     .action(
       action((id: string, opts: BaseOpts & { projectRoot: string; base?: string }) => {
@@ -869,13 +879,87 @@ export function buildCli(): Command {
       }),
     );
 
+  /** Faz 15 — Mod A'da epic bitince Telegram özeti (`workflow.notify_epic_done`). */
+  async function notifyEpicsIfEnabled(graphRoot: string, epicIds: string[], config: Config): Promise<void> {
+    if (!config.workflow.notify_epic_done || epicIds.length === 0) return;
+    const secrets = loadSecrets();
+    if (!secrets) return;
+    const client = new TelegramClient(secrets.telegramBotToken);
+    await notifyEpicsDone(graphRoot, epicIds, config, (text) => client.sendMessage(secrets.telegramChatId, text));
+  }
+
+  withGraphRoot(
+    program
+      .command("complete")
+      .description("Faz 15: gate (tur otomatik) + geçtiyse finish + yakınsamadıysa yükselt/kuyruğa koy ya da fail"),
+  )
+    .argument("<ids...>", "task ID'leri (zincirse sırayla)")
+    .action(
+      asyncAction(async (ids: string[], opts: BaseOpts & { projectRoot: string }) => {
+        const config = loadConfig(loadGraph(opts));
+        const result = completeTasks(opts.graphRoot, ids, config, { projectRoot: opts.projectRoot });
+        await notifyEpicsIfEnabled(opts.graphRoot, result.epicsDone, config);
+        output(opts, result, () =>
+          [
+            ...result.done.map((d) => `✓ ${d.id}${d.committed ? " · commit" : ""}${d.unverified ? " · doğrulanmadı" : ""}`),
+            ...result.fix.flatMap((f) => [`✗ ${f.id} (tur ${f.round}) düzelt:`, ...f.issues.map((i) => `  - ${i}`)]),
+            ...result.requeued.map((r) => `↑ ${r.id} → ${r.agent}/${r.model} (kuyrukta)`),
+            ...result.failed.map((f) => `✗ ${f.id} failed: ${f.reason}`),
+            ...result.errors.flatMap((e) => e.errors.map((m) => `✗ ${e.id}: ${m}`)),
+            ...result.epicsDone.map((e) => `★ ${e} bitti`),
+          ].join("\n"),
+        );
+      }),
+    );
+
+  withGraphRoot(
+    program
+      .command("claim")
+      .description("Faz 15 worker modu: bu rol/modele düşen ilk hazır görevi (zinciriyle) başlatır"),
+  )
+    .requiredOption("--agent <agent>", "worker'ın agent'ı (coder, senior, tester, docs)")
+    .requiredOption("--model <model>", "worker'ın modeli")
+    .action(
+      action((opts: BaseOpts & { agent: string; model: string; projectRoot: string }) => {
+        const config = loadConfig(loadGraph(opts));
+        const result = claimTasks(opts.graphRoot, config, {
+          agent: opts.agent,
+          model: opts.model,
+          projectRoot: opts.projectRoot,
+        });
+        output(opts, result, () =>
+          result.claimed
+            ? result.claimed.tasks.map((t) => `▶ ${t.id} · ${t.contextPath}`).join("\n")
+            : `· görev yok (bekleyen: ${result.waiting})`,
+        );
+      }),
+    );
+
+  withGraphRoot(
+    program.command("workers").description("Faz 15 worker modu: başlatılacak worker'lar (rol/model) ve genişletme adayları"),
+  ).action(
+    action((opts: BaseOpts) => {
+      const config = loadConfig(loadGraph(opts));
+      const plan = planWorkers(opts.graphRoot, config);
+      output(opts, plan, () =>
+        [
+          ...plan.launch.map((w) => `▶ ${w.agent}/${w.model} — ${w.ready} hazır görev`),
+          `çalışan: ${plan.running}`,
+          plan.expand.length ? `genişletme: ${plan.expand.join(", ")}` : "",
+          plan.finished ? "✓ bitti" : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }),
+  );
+
   withGraphRoot(
     program
       .command("verify")
       .description("Faz 14 O9: görevin verify: komutlarını çalıştırır (Katman 1, sıfır token)"),
   )
     .argument("<id>", "task ID'si")
-    .option("-p, --project-root <path>", "proje kökü", ".")
     .action(
       action((id: string, opts: BaseOpts & { projectRoot: string }) => {
         const graph = loadGraph(opts);
@@ -906,7 +990,6 @@ export function buildCli(): Command {
       .description("Katman 2 (ADR-008): kabul kriterlerini diff'e karşı kontrol eder"),
   )
     .argument("<id>", "task ID'si")
-    .option("-p, --project-root <path>", "git diff'in çalıştığı kök", ".")
     .action(
       action((id: string, opts: BaseOpts & { projectRoot: string }) => {
         const graph = loadGraph(opts);
@@ -1094,7 +1177,6 @@ export function buildCli(): Command {
           "İLK/TEMEL sürüm — doğrulama döngüsü/escalation entegre değil, düğüm başına tek deneme.",
       ),
   )
-    .option("-p, --project-root <path>", "proje kökü (git/çalışma dizini)", ".")
     .requiredOption(
       "--agents-dir <path>",
       "agent tanım dosyalarının (coder.md vb.) bulunduğu dizin",
@@ -1609,7 +1691,6 @@ export function buildCli(): Command {
   )
     .requiredOption("--sample-task <id>", "gp context için örnek task ID'si")
     .requiredOption("--agents-dir <path>", "agent tanım dosyalarının bulunduğu dizin")
-    .option("-p, --project-root <path>", "repo-map için taranacak kök", ".")
     .option("--out <path>", "markdown tablonun yazılacağı dosya (verilmezse stdout)")
     .action(
       action(

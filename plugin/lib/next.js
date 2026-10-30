@@ -50,7 +50,7 @@ function groupByTouchesConflict(tasks) {
     }
     return groups;
 }
-function touchesConflict(a, b) {
+export function touchesConflict(a, b) {
     for (const pa of a) {
         const prefixA = literalPrefix(pa);
         for (const pb of b) {

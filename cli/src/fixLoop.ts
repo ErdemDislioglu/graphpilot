@@ -23,7 +23,7 @@ export function recordFixLoopRound(
 
 export function readFixLoopRounds(graphRootDir: string, nodeId: string): FixLoopRound[] {
   return readMetrics(graphRootDir, FIX_LOOP_METRICS_FILE)
-    .filter((r) => r.node === nodeId)
+    .filter((r) => r.node === nodeId && typeof r.round === "number")
     .map((r) => ({
       round: r.round as number,
       issuesCount: r.issuesCount as number,
@@ -117,4 +117,27 @@ export function computeFixLoopTokenRatio(rounds: FixLoopRound[]): FixLoopTokenRa
     laterRoundsTokens,
     ratio: firstRoundTokens > 0 ? laterRoundsTokens / firstRoundTokens : null,
   };
+}
+
+/**
+ * Faz 15 — escalate sonrası yeni model/rol tur sınırını baştan kullanabilsin diye işaret.
+ * Eskiden sayaç sıfırlanmıyordu: 3 turu tüketmiş görev üst modele geçince ilk eksikte
+ * yeniden yükseltiliyordu. `readFixLoopRounds` (ölçüm) işaretten etkilenmez.
+ */
+export function markFixLoopReset(graphRootDir: string, nodeId: string): void {
+  appendMetric(graphRootDir, FIX_LOOP_METRICS_FILE, { node: nodeId, reset: true, ts: new Date().toISOString() });
+}
+
+/** Son `markFixLoopReset`'ten sonraki turlar — fix-loop frenleri bunlara uygulanır. */
+export function readCurrentAttemptRounds(graphRootDir: string, nodeId: string): FixLoopRound[] {
+  const rows = readMetrics(graphRootDir, FIX_LOOP_METRICS_FILE).filter((r) => r.node === nodeId);
+  const lastReset = rows.map((r) => r.reset === true).lastIndexOf(true);
+  return rows
+    .slice(lastReset + 1)
+    .filter((r) => typeof r.round === "number")
+    .map((r) => ({
+      round: r.round as number,
+      issuesCount: r.issuesCount as number,
+      tokens: r.tokens as number | undefined,
+    }));
 }
