@@ -19,6 +19,7 @@ import { classifyLimitError } from "./limitClassifier.js";
 import { planLimitWait } from "./limitWait.js";
 import {
   applyBlockedAnswer,
+  applyFailurePolicy,
   autoBlockedAnswer,
   markBlocked,
   needsRiskApproval,
@@ -64,7 +65,8 @@ export type AutopilotStopReason =
   | "deadlock"
   | "user_stop"
   | "spend_limit"
-  | "max_wait_exceeded";
+  | "max_wait_exceeded"
+  | "failure_stop";
 
 export interface AutopilotLoopResult {
   processedCount: number;
@@ -501,28 +503,37 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
       continue;
     }
 
-    const deadlock = computeDeadlockReport(graph);
-    // Cevabı beklenen bir `blocked` sorusu varsa kilit geçicidir — cevap gelince açılır.
-    if (deadlock.isDeadlocked && blockedAsks.size === 0) {
-      await notifyDeadlock({ graphRootDir, notifier, lang, reasons: deadlock.reasons });
-      return { processedCount, stopReason: "deadlock" };
-    }
-
     // Yalnız `failed` görevler: risk onayı yukarıda, görev başlamadan sorulur (hazır olmayan
-    // ya da bitmiş `risk: high` görevler burada bir daha sorulmaz).
-    const needingApproval = [...graph.nodesById.values()].find(
+    // ya da bitmiş `risk: high` görevler burada bir daha sorulmaz). Deadlock kontrolünden ÖNCE:
+    // bağımlısı olan bir görev başarısız olunca eskiden sorulmadan "deadlock" deyip duruyordu.
+    const failedTask = [...graph.nodesById.values()].find(
       (n) => n.kind === "task" && n.frontmatter.status === "failed",
     );
-    if (needingApproval) {
+    if (failedTask) {
+      const policy = config.autopilot.approvals.on_failure;
+      if (policy !== "ask") {
+        await applyFailurePolicy({
+          graph,
+          graphRootDir,
+          notifier,
+          lang,
+          node: failedTask,
+          action: policy,
+          lastError: lastErrorLine(failedTask),
+        });
+        if (policy === "stop") return { processedCount, stopReason: "failure_stop" };
+        await handleEpicCompletionIfAny(failedTask.id, opts);
+        continue;
+      }
       const outcome = await requestApproval({
         graph,
         graphRootDir,
         config,
         notifier,
         lang,
-        node: needingApproval,
-        attempts: Number(needingApproval.frontmatter.attempts ?? 1),
-        lastError: lastErrorLine(needingApproval),
+        node: failedTask,
+        attempts: Number(failedTask.frontmatter.attempts ?? 1),
+        lastError: lastErrorLine(failedTask),
         sleep,
         poll: pollForApproval,
         pollIntervalMs: opts.pollIntervalMs,
@@ -530,6 +541,13 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
       if (outcome.decision === "stop") return { processedCount, stopReason: "user_stop" };
       idleWaitingNoticeSent = false;
       continue;
+    }
+
+    const deadlock = computeDeadlockReport(graph);
+    // Cevabı beklenen bir `blocked` sorusu varsa kilit geçicidir — cevap gelince açılır.
+    if (deadlock.isDeadlocked && blockedAsks.size === 0) {
+      await notifyDeadlock({ graphRootDir, notifier, lang, reasons: deadlock.reasons });
+      return { processedCount, stopReason: "deadlock" };
     }
 
     const { done, skipped, total } = countTasks(graph);

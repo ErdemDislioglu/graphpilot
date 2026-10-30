@@ -163,10 +163,12 @@ function applyDecision(graph: Graph, node: GraphNode, config: Config, decision: 
   switch (decision) {
     case "retry":
       setFrontmatter(graph, node.id, { status: "pending" });
+      unblockDependents(graph, node.id);
       break;
     case "escalate":
       escalateNode(graph, node.id, config);
       setFrontmatter(graph, node.id, { status: "pending" });
+      unblockDependents(graph, node.id);
       break;
     case "skip":
       setFrontmatter(graph, node.id, { status: "skipped" });
@@ -177,6 +179,22 @@ function applyDecision(graph: Graph, node: GraphNode, config: Config, decision: 
     case "approve":
       break; // yalnız risk onayında anlamlı (applyRiskDecision)
   }
+}
+
+/**
+ * `failNode` (fail.ts) başarısız görevin `pending` bağımlılarını `blocked` yapar. Görev
+ * yeniden kuyruğa girince bunlar `pending`'e dönmeli — yoksa görev sonra done olsa bile
+ * bağımlılar hiç "ready" olmaz ve otopilot sessizce takılı kalır.
+ */
+export function unblockDependents(graph: Graph, nodeId: string): string[] {
+  const unblocked: string[] = [];
+  for (const other of graph.nodesById.values()) {
+    if (other.kind !== "task" || other.frontmatter.status !== "blocked") continue;
+    const deps = Array.isArray(other.frontmatter.depends_on) ? other.frontmatter.depends_on : [];
+    if (!deps.includes(nodeId)) continue;
+    if (setFrontmatter(graph, other.id, { status: "pending" }).ok) unblocked.push(other.id);
+  }
+  return unblocked;
 }
 
 /** Risk onayı: approve → `approved: true` (pending kalır, döngü çalıştırır); stop görevi
@@ -236,6 +254,36 @@ export function applyBlockedAnswer(
   appendErrorHistoryLine(node.filePath, line);
   emitEvent(graphRootDir, { type: "decision_answered", nodeId: node.id, data: { decision, blocked: true, decidedBy } });
   return decision;
+}
+
+/**
+ * Roadmap 12.6 — `approvals.on_failure: skip|stop` (config'te vardı ama döngü okumuyordu,
+ * her `failed` görev soruluyordu). Soru sorulmaz; karar Hata geçmişi'ne ve events.jsonl'e
+ * yazılır, kullanıcıya bilgi mesajı gider. skip → `skipped`; stop → görev `failed` kalır,
+ * çağıran taraf otopilotu durdurur (yeniden başlatınca `gp set` ile düzeltilene dek yine durur).
+ */
+export async function applyFailurePolicy(opts: {
+  graph: Graph;
+  graphRootDir: string;
+  notifier: Notifier;
+  lang: Lang;
+  node: GraphNode;
+  action: "skip" | "stop";
+  lastError: string;
+}): Promise<void> {
+  const { graph, graphRootDir, notifier, lang, node, action, lastError } = opts;
+  if (action === "skip") setFrontmatter(graph, node.id, { status: "skipped" });
+  appendErrorHistoryLine(node.filePath, `${node.id} karar (on_failure): ${action}`);
+  emitEvent(graphRootDir, { type: "decision_answered", nodeId: node.id, data: { decision: action, decidedBy: "on_failure" } });
+  const tr =
+    action === "skip"
+      ? `⚠️ ${node.id} "${node.name}" başarısız (son hata: ${lastError}) — on_failure: skip, atlandı.`
+      : `🛑 ${node.id} "${node.name}" başarısız (son hata: ${lastError}) — on_failure: stop, otopilot durdu.`;
+  const en =
+    action === "skip"
+      ? `⚠️ ${node.id} "${node.name}" failed (last error: ${lastError}) — on_failure: skip, skipped.`
+      : `🛑 ${node.id} "${node.name}" failed (last error: ${lastError}) — on_failure: stop, autopilot stopped.`;
+  await notifier.send(lang === "tr" ? tr : en);
 }
 
 /**

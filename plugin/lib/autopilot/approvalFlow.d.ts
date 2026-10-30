@@ -48,6 +48,12 @@ export declare function requestApproval(opts: {
     pollIntervalMs?: number;
 }): Promise<ApprovalOutcome>;
 /**
+ * `failNode` (fail.ts) başarısız görevin `pending` bağımlılarını `blocked` yapar. Görev
+ * yeniden kuyruğa girince bunlar `pending`'e dönmeli — yoksa görev sonra done olsa bile
+ * bağımlılar hiç "ready" olmaz ve otopilot sessizce takılı kalır.
+ */
+export declare function unblockDependents(graph: Graph, nodeId: string): string[];
+/**
  * Faz 12 — agent `blocked:` döndü (exit 0 olsa da). Escalation'a SOKULMAZ (model
  * değiştirmek bir kararı çözmez): görev `needs_decision` olur, neden `## Hata geçmişi`'ne
  * yazılır. Bağımlıları `computeNext` gereği bekler; bağımsız işler devam eder.
@@ -61,6 +67,21 @@ export declare function markBlocked(graph: Graph, graphRootDir: string, node: Gr
  * (otopilot yeniden başlatılınca tekrar denenir/sorulur), çağıran taraf döngüyü durdurur.
  */
 export declare function applyBlockedAnswer(graph: Graph, graphRootDir: string, node: GraphNode, answer: string, question?: AgentQuestion, decidedBy?: "kullanıcı" | "otomatik"): ApprovalDecision;
+/**
+ * Roadmap 12.6 — `approvals.on_failure: skip|stop` (config'te vardı ama döngü okumuyordu,
+ * her `failed` görev soruluyordu). Soru sorulmaz; karar Hata geçmişi'ne ve events.jsonl'e
+ * yazılır, kullanıcıya bilgi mesajı gider. skip → `skipped`; stop → görev `failed` kalır,
+ * çağıran taraf otopilotu durdurur (yeniden başlatınca `gp set` ile düzeltilene dek yine durur).
+ */
+export declare function applyFailurePolicy(opts: {
+    graph: Graph;
+    graphRootDir: string;
+    notifier: Notifier;
+    lang: Lang;
+    node: GraphNode;
+    action: "skip" | "stop";
+    lastError: string;
+}): Promise<void>;
 /**
  * Kullanıcı isteği (2026-10-30) — Telegram'dan yalnız `risk: high` görevler sorulur.
  * Diğerlerinde `blocked` kararı otomatik: agent'ın `(önerilen)` seçeneği (işaret yoksa

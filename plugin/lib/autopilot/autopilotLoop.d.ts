@@ -3,7 +3,7 @@ import { type ClaudeHeadlessSpawner } from "../runModeB.js";
 import { type Lang } from "./messages.js";
 import type { Notifier } from "./notifier.js";
 import type { TelegramPoller } from "./telegramPoller.js";
-export type AutopilotStopReason = "finished" | "deadlock" | "user_stop" | "spend_limit" | "max_wait_exceeded";
+export type AutopilotStopReason = "finished" | "deadlock" | "user_stop" | "spend_limit" | "max_wait_exceeded" | "failure_stop";
 export interface AutopilotLoopResult {
     processedCount: number;
     stopReason: AutopilotStopReason;

@@ -864,3 +864,86 @@ describe("runAutopilotLoop — risk'i high olmayan blocked görev sorulmaz (kull
     });
   });
 });
+
+describe("runAutopilotLoop — approvals.on_failure (12.6)", () => {
+  const cfg = (onFailure: string) =>
+    "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
+    "budgets: { default_context: 8000, max_turns: 25 }\nteam: { enabled: false }\n" +
+    `autopilot: { approvals: { on_failure: ${onFailure} } }\n`;
+  const failingSpawner: ClaudeHeadlessSpawner = () => ({ stdout: "", stderr: "gerçek hata", status: 1 });
+
+  it("skip → sorulmaz, görev atlanır, bilgi mesajı gider, otopilot biter", async () => {
+    await withTempGraphAsync({ "a.md": taskFrontmatter({}), "config.yml": cfg("skip"), "coder.md": CODER_MD }, async (_graph, dir) => {
+      const notifier = new MockNotifier();
+      const result = await runAutopilotLoop({
+        graphRootDir: dir,
+        agentsDir: dir,
+        notifier,
+        poller: offlinePoller(),
+        lang: "tr",
+        spawner: failingSpawner,
+        sleep: instantSleep,
+        shortRetrySleep: noopShortRetrySleep,
+      });
+      expect(result.stopReason).toBe("finished");
+      expect(notifier.asked).toHaveLength(0);
+      expect(notifier.sent.some((m) => m.includes("on_failure: skip, atlandı"))).toBe(true);
+      const after = matter(readFileSync(join(dir, "a.md"), "utf-8"));
+      expect(after.data.status).toBe("skipped");
+      expect(after.content).toContain("E01-F01-T01 karar (on_failure): skip");
+    });
+  });
+
+  it("stop → sorulmaz, görev failed kalır, otopilot failure_stop ile durur", async () => {
+    await withTempGraphAsync({ "a.md": taskFrontmatter({}), "config.yml": cfg("stop"), "coder.md": CODER_MD }, async (_graph, dir) => {
+      const notifier = new MockNotifier();
+      const result = await runAutopilotLoop({
+        graphRootDir: dir,
+        agentsDir: dir,
+        notifier,
+        poller: offlinePoller(),
+        lang: "tr",
+        spawner: failingSpawner,
+        sleep: instantSleep,
+        shortRetrySleep: noopShortRetrySleep,
+      });
+      expect(result.stopReason).toBe("failure_stop");
+      expect(notifier.asked).toHaveLength(0);
+      expect(notifier.sent.some((m) => m.includes("on_failure: stop, otopilot durdu"))).toBe(true);
+      expect(matter(readFileSync(join(dir, "a.md"), "utf-8")).data.status).toBe("failed");
+    });
+  });
+
+  it("ask + bağımlısı olan görev başarısız → deadlock değil soru gelir; retry ile ikisi de biter", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": taskFrontmatter({}),
+        "b.md": taskFrontmatter({ id: "E01-F01-T02", name: "b", depends_on: ["E01-F01-T01"] }),
+        "config.yml": cfg("ask"),
+        "coder.md": CODER_MD,
+      },
+      async (_graph, dir) => {
+        const notifier = new MockNotifier({ answers: ["retry"] });
+        let calls = 0;
+        const spawner: ClaudeHeadlessSpawner = () => {
+          calls += 1;
+          if (calls === 1) return { stdout: "", stderr: "gerçek hata", status: 1 };
+          return { stdout: "{}", stderr: "", status: 0 };
+        };
+        const result = await runAutopilotLoop({
+          graphRootDir: dir,
+          agentsDir: dir,
+          notifier,
+          poller: offlinePoller(),
+          lang: "tr",
+          spawner,
+          sleep: instantSleep,
+          shortRetrySleep: noopShortRetrySleep,
+        });
+        expect(result).toEqual({ processedCount: 2, stopReason: "finished" });
+        expect(notifier.asked).toHaveLength(1);
+        expect(notifier.sent.some((m) => m.includes("Deadlock"))).toBe(false);
+      },
+    );
+  });
+});

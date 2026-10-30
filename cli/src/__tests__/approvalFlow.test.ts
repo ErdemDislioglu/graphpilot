@@ -414,3 +414,29 @@ describe("autoBlockedAnswer", () => {
     expect(autoBlockedAnswer({ text: "q", options: ["a", "b"] })).toBe("opt:0");
   });
 });
+
+describe("unblockDependents / retry", () => {
+  it("failed görev 'retry' ile kuyruğa dönünce failNode'un blocked yaptığı bağımlıları pending olur", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": frontmatter(TASK({ status: "failed" })),
+        "b.md": frontmatter(TASK({ id: "E01-F01-T02", name: "b", status: "blocked", depends_on: ["E01-F01-T01"] })),
+        "c.md": frontmatter(TASK({ id: "E01-F01-T03", name: "c", status: "blocked", depends_on: ["E01-F01-T09"] })),
+      },
+      async (graph, dir) => {
+        await requestApproval({
+          graph,
+          graphRootDir: dir,
+          config: ConfigSchema.parse(BASE_CONFIG),
+          notifier: new MockNotifier({ answers: ["retry"] }),
+          lang: "tr",
+          node: graph.nodesById.get("E01-F01-T01")!,
+          attempts: 1,
+          lastError: "x",
+        });
+        expect(matter(readFileSync(join(dir, "b.md"), "utf-8")).data.status).toBe("pending");
+        expect(matter(readFileSync(join(dir, "c.md"), "utf-8")).data.status).toBe("blocked");
+      },
+    );
+  });
+});

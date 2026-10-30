@@ -1,5 +1,5 @@
 import { computeNext } from "./next.js";
-import { tasksOf } from "./graph/types.js";
+import { getDependsOn, tasksOf } from "./graph/types.js";
 import type { Graph } from "./graph/types.js";
 
 export interface DeadlockReason {
@@ -24,13 +24,20 @@ export interface DeadlockReport {
  */
 export function computeDeadlockReport(graph: Graph): DeadlockReport {
   const next = computeNext(graph);
-  const hasRunning = tasksOf(graph).some((t) => t.frontmatter.status === "running");
+  const tasks = tasksOf(graph);
+  const hasRunning = tasks.some((t) => t.frontmatter.status === "running");
+  // `status: blocked` (failNode'un işaretlediği bağımlılar) `computeNext`'in `blocked`'ında
+  // yok (o yalnız `pending`'e bakar) — onlar da bitmemiş, ilerleyemeyen iştir.
+  const markedBlocked = tasks
+    .filter((t) => t.frontmatter.status === "blocked")
+    .map((t) => ({ node: t, waitingOn: getDependsOn(graph, t.id).filter((d) => d.frontmatter.status !== "done") }));
+  const stuck = [...next.blocked, ...markedBlocked];
 
-  if (next.ready.length > 0 || hasRunning || next.blocked.length === 0) {
+  if (next.ready.length > 0 || hasRunning || stuck.length === 0) {
     return { isDeadlocked: false, reasons: [] };
   }
 
-  const reasons: DeadlockReason[] = next.blocked.flatMap((b) =>
+  const reasons: DeadlockReason[] = stuck.flatMap((b) =>
     b.waitingOn.map((w) => ({
       nodeId: b.node.id,
       blockedBy: w.id,

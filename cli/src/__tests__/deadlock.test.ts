@@ -74,3 +74,19 @@ describe("computeDeadlockReport", () => {
     );
   });
 });
+
+describe("computeDeadlockReport — status: blocked (failNode'un işaretlediği bağımlılar)", () => {
+  it("skipped bir göreve bağlı 'blocked' görev deadlock sayılır (eskiden görünmüyordu, otopilot sessizce takılıyordu)", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(TASK({ id: "E01-F01-T01", name: "a", status: "skipped" })),
+        "b.md": frontmatter(TASK({ id: "E01-F01-T02", name: "b", status: "blocked", depends_on: ["E01-F01-T01"] })),
+      },
+      (graph) => {
+        const report = computeDeadlockReport(graph);
+        expect(report.isDeadlocked).toBe(true);
+        expect(report.reasons).toEqual([{ nodeId: "E01-F01-T02", blockedBy: "E01-F01-T01", blockerStatus: "skipped" }]);
+      },
+    );
+  });
+});
