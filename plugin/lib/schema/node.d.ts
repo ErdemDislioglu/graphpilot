@@ -114,6 +114,7 @@ export declare const NodeFrontmatterSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         junior: "junior";
     }>>;
     verify: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    approved: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strict>, z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodLiteral<"knowledge">;

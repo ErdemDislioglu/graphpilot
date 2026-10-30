@@ -647,3 +647,162 @@ describe("runAutopilotLoop — Telegram'dan /run <EPIC> (Faz 12.13)", () => {
     );
   });
 });
+
+describe("runAutopilotLoop — risk: high onayı (12.6 düzeltmesi)", () => {
+  it("aynı risk:high görev iki turda iki kez sorulmaz; done risk:high görev hiç sorulmaz", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": taskFrontmatter({ risk: "high" }),
+        "b.md": taskFrontmatter({ id: "E01-F01-T02", name: "b", depends_on: ["E01-F01-T01"] }),
+        "c.md": taskFrontmatter({ id: "E01-F01-T03", name: "c", risk: "high", status: "done" }),
+        "config.yml":
+          "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
+          "budgets: { default_context: 8000, max_turns: 25 }\nteam: { enabled: false }\n" +
+          "autopilot: { approvals: { on_risk_high: true } }\n",
+        "coder.md": CODER_MD,
+      },
+      async (_graph, dir) => {
+        const notifier = new MockNotifier({ answers: ["approve"] });
+        const result = await runAutopilotLoop({
+          graphRootDir: dir,
+          agentsDir: dir,
+          notifier,
+          poller: offlinePoller(),
+          lang: "tr",
+          spawner: () => ({ stdout: JSON.stringify({ result: "done" }), stderr: "", status: 0 }),
+          sleep: instantSleep,
+          shortRetrySleep: noopShortRetrySleep,
+        });
+
+        expect(result).toEqual({ processedCount: 2, stopReason: "finished" });
+        expect(notifier.asked).toHaveLength(1);
+        expect(notifier.asked[0].question).toContain('E01-F01-T01 "a" riskli (risk: high)');
+        const after = matter(readFileSync(join(dir, "a.md"), "utf-8"));
+        expect(after.data.status).toBe("done");
+        expect(after.data.approved).toBe(true);
+      },
+    );
+  });
+});
+
+describe("runAutopilotLoop — agent 'blocked:' dönüşü (Faz 12)", () => {
+  it("blocked → needs_decision, escalation/commit yok, bağımsız görev sürer; 'retry' ile tekrar çalışır", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": taskFrontmatter({}),
+        "b.md": taskFrontmatter({ id: "E01-F01-T02", name: "b" }),
+        "config.yml":
+          "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
+          "budgets: { default_context: 8000, max_turns: 25 }\nteam: { enabled: true }\n" +
+          "autopilot: { git: { commit: true } }\n",
+        "coder.md": CODER_MD,
+      },
+      async (_graph, dir) => {
+        let answer: (v: string) => void = () => {};
+        const asked: string[] = [];
+        const notifier = {
+          sent: [] as string[],
+          async send(m: string) {
+            this.sent.push(m);
+          },
+          ask(q: string): Promise<string> {
+            asked.push(q);
+            return new Promise<string>((r) => {
+              answer = r;
+            });
+          },
+          async edit() {},
+        };
+        const commits: string[] = [];
+        const git = (args: string[]) => {
+          if (args[0] === "commit") commits.push(args.join(" "));
+          if (args.join(" ") === "rev-parse --is-inside-work-tree") return { stdout: "true\n", status: 0 };
+          if (args.join(" ") === "diff --cached --quiet") return { stdout: "", status: 1 };
+          return { stdout: "", status: 0 };
+        };
+        const runs: string[] = [];
+        let t01Runs = 0;
+        const spawner: ClaudeHeadlessSpawner = (args) => {
+          // Epic indeksi kardeş ID'leri de içerir — görevin kendi frontmatter satırına bak.
+          const isT01 = args[1].includes('id: "E01-F01-T01"');
+          runs.push(isT01 ? "T01" : "T02");
+          if (isT01 && ++t01Runs === 1) {
+            return { stdout: JSON.stringify({ result: "Denedim.\nblocked: API anahtarı yok" }), stderr: "", status: 0 };
+          }
+          if (!isT01) {
+            // Bağımsız görev çalışırken T01 kararını bekliyor; commit atılmamış.
+            expect(matter(readFileSync(join(dir, "a.md"), "utf-8")).data.status).toBe("needs_decision");
+            expect(commits).toHaveLength(0);
+            answer("retry");
+          }
+          return { stdout: JSON.stringify({ result: "done" }), stderr: "", status: 0 };
+        };
+
+        const result = await runAutopilotLoop({
+          graphRootDir: dir,
+          agentsDir: dir,
+          notifier,
+          poller: offlinePoller(),
+          lang: "tr",
+          spawner,
+          git,
+          sleep: instantSleep,
+          shortRetrySleep: noopShortRetrySleep,
+        });
+
+        expect(result).toEqual({ processedCount: 2, stopReason: "finished" });
+        expect(runs).toEqual(["T01", "T02", "T01"]);
+        expect(asked).toEqual(["⛔ E01-F01-T01 durdu: API anahtarı yok. Karar gerekiyor."]);
+        expect(commits).toHaveLength(2); // T02 ve tekrar denenen T01 — blocked turda değil
+        const eventTypes = readEvents(dir).map((e) => e.type);
+        expect(eventTypes).not.toContain("escalated");
+        expect(eventTypes).not.toContain("failure");
+        const after = matter(readFileSync(join(dir, "a.md"), "utf-8"));
+        expect(after.data.status).toBe("done");
+        expect(after.data.assignee ?? "auto").toBe("auto");
+        expect(after.content).toContain("E01-F01-T01 blocked: API anahtarı yok");
+      },
+    );
+  });
+
+  it("mimari karar sorusu: seçenekler buton olur, seçim Hata geçmişi'ne yazılıp görev yeniden çalışır", async () => {
+    await withTempGraphAsync(
+      {
+        "a.md": taskFrontmatter({}),
+        "config.yml":
+          "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
+          "budgets: { default_context: 8000, max_turns: 25 }\nteam: { enabled: false }\n",
+        "coder.md": CODER_MD,
+      },
+      async (_graph, dir) => {
+        const notifier = new MockNotifier({ answers: ["opt:0"] });
+        const contexts: string[] = [];
+        const spawner: ClaudeHeadlessSpawner = (args) => {
+          contexts.push(args[1]);
+          if (contexts.length === 1) {
+            const result = "blocked: veri modeli kararı\nsoru: Hangi veritabanı?\nseçenek: PostgreSQL\nseçenek: SQLite";
+            return { stdout: JSON.stringify({ result }), stderr: "", status: 0 };
+          }
+          return { stdout: JSON.stringify({ result: "done" }), stderr: "", status: 0 };
+        };
+
+        const result = await runAutopilotLoop({
+          graphRootDir: dir,
+          agentsDir: dir,
+          notifier,
+          poller: offlinePoller(),
+          lang: "tr",
+          spawner,
+          sleep: instantSleep,
+          shortRetrySleep: noopShortRetrySleep,
+        });
+
+        expect(result.stopReason).toBe("finished");
+        expect(notifier.asked[0].question).toContain("❓ Hangi veritabanı?");
+        expect(notifier.asked[0].options.map((o) => o.value)).toEqual(["opt:0", "opt:1", "skip", "stop"]);
+        // Yeniden çalışan agent kararı bağlam paketinde (kendi düğüm gövdesi) görür.
+        expect(contexts[1]).toContain("karar (kullanıcı): Hangi veritabanı? → PostgreSQL");
+      },
+    );
+  });
+});

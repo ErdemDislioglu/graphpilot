@@ -76,13 +76,16 @@ const LIST_FIELDS = new Set([
   "verify",
 ]);
 
+// Frontmatter'da henüz olmayabilen opsiyonel boolean alanlar — mevcut değerden tip çıkarılamaz.
+const BOOLEAN_FIELDS = new Set(["approved"]);
+
 function coerce(key: string, existing: unknown, rawValue: string): unknown {
   if (LIST_FIELDS.has(key) || Array.isArray(existing)) return parseList(key, rawValue);
   if (typeof existing === "number") {
     const n = Number(rawValue);
     return Number.isNaN(n) ? rawValue : n;
   }
-  if (typeof existing === "boolean") {
+  if (typeof existing === "boolean" || BOOLEAN_FIELDS.has(key)) {
     if (rawValue === "true") return true;
     if (rawValue === "false") return false;
     return rawValue;

@@ -35,6 +35,45 @@ export function failureApprovalMessage(lang, opts) {
         ];
     return { text, buttons };
 }
+/** Roadmap 12.6 — `risk: high` görev başlamadan ÖNCE sorulur (başarısızlık değil — ayrı şablon). */
+export function riskApprovalMessage(lang, opts) {
+    const text = lang === "tr"
+        ? `⚠️ ${opts.nodeId} "${opts.nodeTitle}" riskli (risk: high). Başlatılsın mı?`
+        : `⚠️ ${opts.nodeId} "${opts.nodeTitle}" is risky (risk: high). Start it?`;
+    const buttons = lang === "tr"
+        ? [
+            { label: "Onayla", value: "approve" },
+            { label: "Atla", value: "skip" },
+            { label: "Durdur", value: "stop" },
+        ]
+        : [
+            { label: "Approve", value: "approve" },
+            { label: "Skip", value: "skip" },
+            { label: "Stop", value: "stop" },
+        ];
+    return { text, buttons };
+}
+/** `blockedDecisionMessage` seçenek butonlarının `value` öneki — `opt:<indeks>`. */
+export const OPTION_VALUE_PREFIX = "opt:";
+/**
+ * Agent `blocked:` döndü — karar kullanıcıda. Agent `soru:`/`seçenek:` verdiyse (mimari
+ * karar) seçenekler buton olur, "Tekrar dene" yerine geçer (seçim zaten yeniden çalıştırır).
+ */
+export function blockedDecisionMessage(lang, opts) {
+    const head = lang === "tr"
+        ? `⛔ ${opts.nodeId} durdu: ${opts.reason}. Karar gerekiyor.`
+        : `⛔ ${opts.nodeId} stopped: ${opts.reason}. Decision needed.`;
+    const text = opts.question ? `${head}\n❓ ${opts.question.text}` : head;
+    const optionButtons = opts.question
+        ? opts.question.options.map((label, i) => ({ label, value: `${OPTION_VALUE_PREFIX}${i}` }))
+        : [{ label: lang === "tr" ? "Tekrar dene" : "Retry", value: "retry" }];
+    const buttons = [
+        ...optionButtons,
+        { label: lang === "tr" ? "Atla" : "Skip", value: "skip" },
+        { label: lang === "tr" ? "Durdur" : "Stop", value: "stop" },
+    ];
+    return { text, buttons };
+}
 export function limitMessage(lang, opts) {
     const reset = opts.resetHint
         ? lang === "tr"

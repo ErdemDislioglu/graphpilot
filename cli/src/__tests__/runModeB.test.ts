@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildHeadlessArgs,
   isRateLimitSignal,
+  lastAgentMessage,
+  parseAgentReturn,
   runNodeHeadless,
   runNodeHeadlessWithRetry,
 } from "../runModeB.js";
@@ -35,6 +37,58 @@ describe("buildHeadlessArgs", () => {
     expect(args).toContain("--strict-mcp-config");
     expect(args).toContain("--disable-slash-commands");
     expect(args).not.toContain("--mcp-config");
+  });
+});
+
+describe("runNodeHeadless — agent 'blocked:' dönüşü (Faz 12)", () => {
+  const json = (result: string) => JSON.stringify({ type: "result", result });
+
+  it("json çıktıda result'ın son satırı 'blocked: X' → ok:false, blocked:true, reason", () => {
+    const r = runNodeHeadless("ctx", AGENT_DEF, ROUTE, () => ({ stdout: json("Denedim.\nblocked: API anahtarı yok"), status: 0 }));
+    expect(r).toMatchObject({ ok: false, blocked: true, blockedReason: "API anahtarı yok" });
+    expect(r.question).toBeUndefined();
+  });
+
+  it("json olmayan düz stdout'ta da 'blocked:' yakalanır", () => {
+    const r = runNodeHeadless("ctx", AGENT_DEF, ROUTE, () => ({ stdout: "blocked: brief çelişkili\n", status: 0 }));
+    expect(r).toMatchObject({ ok: false, blocked: true, blockedReason: "brief çelişkili" });
+  });
+
+  it("normal 'done' çıktısı → ok:true, blocked yok", () => {
+    const r = runNodeHeadless("ctx", AGENT_DEF, ROUTE, () => ({ stdout: json("done\nbulgu: x"), status: 0 }));
+    expect(r.ok).toBe(true);
+    expect(r.blocked).toBeUndefined();
+  });
+
+  it("satır ortasındaki 'blocked:' sayılmaz", () => {
+    const r = runNodeHeadless("ctx", AGENT_DEF, ROUTE, () => ({ stdout: json("done — hiçbir şey blocked: değil"), status: 0 }));
+    expect(r.ok).toBe(true);
+  });
+
+  it("soru + en az iki seçenek → question döner (mimari karar)", () => {
+    const out = json("blocked: veri modeli kararı\nsoru: Hangi veritabanı?\nseçenek: PostgreSQL\nseçenek: SQLite");
+    const r = runNodeHeadless("ctx", AGENT_DEF, ROUTE, () => ({ stdout: out, status: 0 }));
+    expect(r.question).toEqual({ text: "Hangi veritabanı?", options: ["PostgreSQL", "SQLite"] });
+  });
+
+  it("tek seçenekli soru yok sayılır (buton anlamsız) — yalnız blocked", () => {
+    expect(parseAgentReturn("blocked: x\nsoru: y?\nseçenek: a")).toEqual({ blockedReason: "x" });
+  });
+
+  it("lastAgentMessage: json result alanı, değilse ham stdout", () => {
+    expect(lastAgentMessage(json("merhaba"))).toBe("merhaba");
+    expect(lastAgentMessage("{}")).toBe("{}");
+    expect(lastAgentMessage("düz")).toBe("düz");
+  });
+
+  it("runNodeHeadlessWithRetry: gerekçe 'rate limit' içerse bile blocked retry edilmez", () => {
+    let calls = 0;
+    const r = runNodeHeadlessWithRetry("ctx", AGENT_DEF, ROUTE, { enabled: true, waitSeconds: 0, maxRetries: 3 }, () => {
+      calls += 1;
+      return { stdout: json("blocked: rate limit politikası belirsiz"), status: 0 };
+    }, () => {});
+    expect(calls).toBe(1);
+    expect(r).toMatchObject({ blocked: true, rateLimited: false, attempts: 1 });
   });
 });
 

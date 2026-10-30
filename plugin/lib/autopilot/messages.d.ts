@@ -24,6 +24,25 @@ export declare function failureApprovalMessage(lang: Lang, opts: {
     attempts: number;
     lastError: string;
 }): TemplateMessage;
+/** Roadmap 12.6 — `risk: high` görev başlamadan ÖNCE sorulur (başarısızlık değil — ayrı şablon). */
+export declare function riskApprovalMessage(lang: Lang, opts: {
+    nodeId: string;
+    nodeTitle: string;
+}): TemplateMessage;
+/** `blockedDecisionMessage` seçenek butonlarının `value` öneki — `opt:<indeks>`. */
+export declare const OPTION_VALUE_PREFIX = "opt:";
+/**
+ * Agent `blocked:` döndü — karar kullanıcıda. Agent `soru:`/`seçenek:` verdiyse (mimari
+ * karar) seçenekler buton olur, "Tekrar dene" yerine geçer (seçim zaten yeniden çalıştırır).
+ */
+export declare function blockedDecisionMessage(lang: Lang, opts: {
+    nodeId: string;
+    reason: string;
+    question?: {
+        text: string;
+        options: string[];
+    };
+}): TemplateMessage;
 export declare function limitMessage(lang: Lang, opts: {
     resetHint?: string;
     doneCount: number;

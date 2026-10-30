@@ -37,5 +37,8 @@ export const TaskFrontmatterSchema = z
     // `gp verify <id>` hepsini proje kökünde çalıştırır; Katman 1'i deterministik yapar ve
     // git'siz modda Katman 2'nin (diff'e dayalı `gp check`) yerini tutar (B11).
     verify: z.array(z.string().min(1)).default([]),
+    // Roadmap 12.6 düzeltmesi — `risk: high` görev otopilotta bir kez onaylandı; bir daha
+    // sorulmaz (onay kalıcı, süreç yeniden başlasa da). Yoksa = henüz onaylanmadı.
+    approved: z.boolean().optional(),
 })
     .strict();

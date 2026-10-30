@@ -1,8 +1,10 @@
 import { type Lang } from "./messages.js";
 import type { Notifier } from "./notifier.js";
 import type { Config } from "../schema/index.js";
-import type { Graph, GraphNode } from "../graph/types.js";
-export type ApprovalDecision = "retry" | "escalate" | "skip" | "stop";
+import { type Graph, type GraphNode } from "../graph/types.js";
+import type { AgentQuestion } from "../runModeB.js";
+export type ApprovalDecision = "retry" | "escalate" | "skip" | "stop" | "approve";
+export type ApprovalKind = "failure" | "risk";
 export interface ApprovalOutcome {
     nodeId: string;
     decision: ApprovalDecision;
@@ -14,7 +16,14 @@ export interface ApprovalOutcome {
  * zinciri tükendiğinde çağrılıyor (SPEC/roadmap 6.5) — bir düğümün `status === "failed"`
  * olması kendi başına "doğrulama döngüsü ve yükseltme sonrası" koşulunu karşılar.
  */
-export declare function needsApproval(node: GraphNode, config: Config): boolean;
+export declare function needsApproval(node: GraphNode, config: Config, graph: Graph): boolean;
+/**
+ * Roadmap 12.6 düzeltmesi — risk onayı YALNIZ gerçekten sıradaki görev için: `pending`,
+ * tüm bağımlılıkları `done` (yani `computeNext`'in "ready" tanımı) ve daha önce
+ * onaylanmamış (`approved: true` yok). Eskiden her turda done olanlar dahil tüm
+ * `risk: high` görevler soruluyordu; "retry" bitmiş görevi baştan çalıştırıyordu.
+ */
+export declare function needsRiskApproval(node: GraphNode, config: Config, graph: Graph): boolean;
 /**
  * Roadmap 12.6 — tam onay akışı: düğümü `needs_decision` yapar (bu sırada SADECE ona
  * bağımlı düğümler bekler — `computeNext`/`next.ts` zaten "done değilse bağımlı bekler"
@@ -31,8 +40,27 @@ export declare function requestApproval(opts: {
     node: GraphNode;
     attempts: number;
     lastError: string;
+    /** Varsayılan "failure" (12.6'nın başarısızlık onayı). "risk": `risk: high` başlatma onayı. */
+    kind?: ApprovalKind;
     sleep?: (ms: number) => Promise<void>;
+    /** Bekleme sırasında Telegram güncellemelerini işlemek için (`poller.pollOnce`). */
+    poll?: () => Promise<void>;
+    pollIntervalMs?: number;
 }): Promise<ApprovalOutcome>;
+/**
+ * Faz 12 — agent `blocked:` döndü (exit 0 olsa da). Escalation'a SOKULMAZ (model
+ * değiştirmek bir kararı çözmez): görev `needs_decision` olur, neden `## Hata geçmişi`'ne
+ * yazılır. Bağımlıları `computeNext` gereği bekler; bağımsız işler devam eder.
+ */
+export declare function markBlocked(graph: Graph, graphRootDir: string, node: GraphNode, reason: string, question?: AgentQuestion): void;
+/**
+ * `markBlocked` sonrası Telegram cevabını uygular. `opt:<i>` (mimari karar seçeneği) →
+ * seçim `## Hata geçmişi`'ne "karar (kullanıcı)" olarak yazılır (görev yeniden
+ * çalışınca bağlam paketinde görünür) ve epic karar günlüğüne (13.11) işlenir, görev
+ * `pending`'e döner. retry → pending, skip → skipped. stop → görev `pending`'e döner
+ * (otopilot yeniden başlatılınca tekrar denenir/sorulur), çağıran taraf döngüyü durdurur.
+ */
+export declare function applyBlockedAnswer(graph: Graph, graphRootDir: string, node: GraphNode, answer: string, question?: AgentQuestion): ApprovalDecision;
 /**
  * Roadmap 12.6 — deadlock için düzeltici tek bir "doğru" eylem yok (hangi düğümü
  * tekrar/atla/durdur seçilecek belirsiz — kökteki düğüm genelde zaten kendi `failed`

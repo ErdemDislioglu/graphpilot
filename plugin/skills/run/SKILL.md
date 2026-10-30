@@ -76,6 +76,7 @@ Dönüşün YALNIZ: "done: <id,…>" ve varsa "failed: <id> <neden>", "bulgu: <t
   [repo_map açıksa] Dosya aramadan önce paketteki [[repo-map]]'e bak.
   Her görev için kendi düğüm dosyasındaki ## Handoff'u doldur (≤250 token).
   Dönüşün YALNIZ şu olsun: "done" ya da "blocked: <neden>", varsa "bulgu: <tek satır>".
+  Karar gerekiyorsa "blocked:" altına "soru: <tek cümle>" + 2–4 "seçenek: <metin>" satırı.
   Handoff'u ya da yaptığın işi rapora tekrar yazma.
   ```
 

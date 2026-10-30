@@ -2,12 +2,21 @@ import { setFrontmatter } from "../set.js";
 import { appendErrorHistoryLine } from "../errorHistory.js";
 import { escalateNode } from "../escalate.js";
 import { emitEvent } from "./eventBus.js";
-import { failureApprovalMessage, limitMessage, type Lang } from "./messages.js";
+import { recordDecision } from "../team/decisionLog.js";
+import {
+  OPTION_VALUE_PREFIX,
+  failureApprovalMessage,
+  limitMessage,
+  riskApprovalMessage,
+  type Lang,
+} from "./messages.js";
 import type { Notifier } from "./notifier.js";
 import type { Config } from "../schema/index.js";
-import type { Graph, GraphNode } from "../graph/types.js";
+import { getDependsOn, type Graph, type GraphNode } from "../graph/types.js";
+import type { AgentQuestion } from "../runModeB.js";
 
-export type ApprovalDecision = "retry" | "escalate" | "skip" | "stop";
+export type ApprovalDecision = "retry" | "escalate" | "skip" | "stop" | "approve";
+export type ApprovalKind = "failure" | "risk";
 
 export interface ApprovalOutcome {
   nodeId: string;
@@ -21,16 +30,55 @@ export interface ApprovalOutcome {
  * zinciri tükendiğinde çağrılıyor (SPEC/roadmap 6.5) — bir düğümün `status === "failed"`
  * olması kendi başına "doğrulama döngüsü ve yükseltme sonrası" koşulunu karşılar.
  */
-export function needsApproval(node: GraphNode, config: Config): boolean {
+export function needsApproval(node: GraphNode, config: Config, graph: Graph): boolean {
   if (node.frontmatter.status === "failed") return true;
-  if (config.autopilot.approvals.on_risk_high && node.frontmatter.risk === "high") return true;
-  return false;
+  return needsRiskApproval(node, config, graph);
+}
+
+/**
+ * Roadmap 12.6 düzeltmesi — risk onayı YALNIZ gerçekten sıradaki görev için: `pending`,
+ * tüm bağımlılıkları `done` (yani `computeNext`'in "ready" tanımı) ve daha önce
+ * onaylanmamış (`approved: true` yok). Eskiden her turda done olanlar dahil tüm
+ * `risk: high` görevler soruluyordu; "retry" bitmiş görevi baştan çalıştırıyordu.
+ */
+export function needsRiskApproval(node: GraphNode, config: Config, graph: Graph): boolean {
+  if (!config.autopilot.approvals.on_risk_high) return false;
+  if (node.frontmatter.risk !== "high" || node.frontmatter.approved === true) return false;
+  if (node.frontmatter.status !== "pending") return false;
+  return getDependsOn(graph, node.id).every((d) => d.frontmatter.status === "done");
 }
 
 const TIMEOUT_SENTINEL = Symbol("autopilot-approval-timeout");
+type Timeout = typeof TIMEOUT_SENTINEL;
+const timeoutAfter = (sleep: (ms: number) => Promise<void>, ms: number): Promise<Timeout> =>
+  sleep(ms).then((): Timeout => TIMEOUT_SENTINEL);
 
 async function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * `ask()`'ın cevabı ancak biri `poller.pollOnce()` çağırınca gelir (telegramNotifier.ts) —
+ * onay beklerken ana döngü durduğu için `poll` verilirse bekleme parçalara bölünür ve her
+ * parça arasında poll edilir. Verilmezse (testler) tek parça bekleme — eski davranış.
+ */
+async function waitForAnswer(
+  askPromise: Promise<string>,
+  timeoutMs: number,
+  sleep: (ms: number) => Promise<void>,
+  poll?: () => Promise<void>,
+  chunkMs = 15_000,
+): Promise<string | Timeout> {
+  if (!poll) return Promise.race([askPromise, timeoutAfter(sleep, timeoutMs)]);
+  let remaining = timeoutMs;
+  while (remaining > 0) {
+    const step = Math.min(chunkMs, remaining);
+    const result = await Promise.race([askPromise, timeoutAfter(sleep, step)]);
+    if (result !== TIMEOUT_SENTINEL) return result;
+    remaining -= step;
+    await poll();
+  }
+  return TIMEOUT_SENTINEL;
 }
 
 /**
@@ -49,36 +97,46 @@ export async function requestApproval(opts: {
   node: GraphNode;
   attempts: number;
   lastError: string;
+  /** Varsayılan "failure" (12.6'nın başarısızlık onayı). "risk": `risk: high` başlatma onayı. */
+  kind?: ApprovalKind;
   sleep?: (ms: number) => Promise<void>;
+  /** Bekleme sırasında Telegram güncellemelerini işlemek için (`poller.pollOnce`). */
+  poll?: () => Promise<void>;
+  pollIntervalMs?: number;
 }): Promise<ApprovalOutcome> {
   const { graph, graphRootDir, config, notifier, lang, node } = opts;
   const sleep = opts.sleep ?? sleepMs;
+  const kind = opts.kind ?? "failure";
 
-  setFrontmatter(graph, node.id, { status: "needs_decision" });
+  // Risk onayında görev `pending` kalır: bekleme sırasında süreç düşerse ya da zaman
+  // aşımı "stop" ise görev kaybolmaz, sonraki başlatmada yeniden sorulur.
+  if (kind === "failure") setFrontmatter(graph, node.id, { status: "needs_decision" });
   emitEvent(graphRootDir, {
     type: "needs_decision",
     nodeId: node.id,
-    message: opts.lastError,
+    message: kind === "risk" ? "risk: high" : opts.lastError,
   });
 
-  const msg = failureApprovalMessage(lang, {
-    nodeId: node.id,
-    nodeTitle: node.name,
-    attempts: opts.attempts,
-    lastError: opts.lastError,
-  });
+  const msg =
+    kind === "risk"
+      ? riskApprovalMessage(lang, { nodeId: node.id, nodeTitle: node.name })
+      : failureApprovalMessage(lang, {
+          nodeId: node.id,
+          nodeTitle: node.name,
+          attempts: opts.attempts,
+          lastError: opts.lastError,
+        });
 
   const timeoutMs = config.autopilot.approvals.timeout_minutes * 60_000;
   const askPromise = notifier.ask(msg.text, msg.buttons ?? []);
-  const timeoutPromise = sleep(timeoutMs).then(() => TIMEOUT_SENTINEL as typeof TIMEOUT_SENTINEL);
-
-  const result = await Promise.race([askPromise, timeoutPromise]);
+  const result = await waitForAnswer(askPromise, timeoutMs, sleep, opts.poll, opts.pollIntervalMs);
   const timedOut = result === TIMEOUT_SENTINEL;
   const decision: ApprovalDecision = timedOut
     ? config.autopilot.approvals.timeout_action
     : (result as ApprovalDecision);
 
-  applyDecision(graph, node, config, decision);
+  if (kind === "risk") applyRiskDecision(graph, node, decision);
+  else applyDecision(graph, node, config, decision);
 
   emitEvent(graphRootDir, {
     type: "decision_answered",
@@ -116,7 +174,67 @@ function applyDecision(graph: Graph, node: GraphNode, config: Config, decision: 
     case "stop":
       setFrontmatter(graph, node.id, { status: "failed" });
       break;
+    case "approve":
+      break; // yalnız risk onayında anlamlı (applyRiskDecision)
   }
+}
+
+/** Risk onayı: approve → `approved: true` (pending kalır, döngü çalıştırır); stop görevi
+ * `failed` YAPMAZ — yalnız otopilot durur, görev sonra kaldığı yerden sorulur. */
+function applyRiskDecision(graph: Graph, node: GraphNode, decision: ApprovalDecision): void {
+  if (decision === "approve") setFrontmatter(graph, node.id, { approved: "true" });
+  else if (decision === "skip") setFrontmatter(graph, node.id, { status: "skipped" });
+}
+
+/**
+ * Faz 12 — agent `blocked:` döndü (exit 0 olsa da). Escalation'a SOKULMAZ (model
+ * değiştirmek bir kararı çözmez): görev `needs_decision` olur, neden `## Hata geçmişi`'ne
+ * yazılır. Bağımlıları `computeNext` gereği bekler; bağımsız işler devam eder.
+ */
+export function markBlocked(graph: Graph, graphRootDir: string, node: GraphNode, reason: string, question?: AgentQuestion): void {
+  setFrontmatter(graph, node.id, { status: "needs_decision" });
+  appendErrorHistoryLine(node.filePath, `${node.id} blocked: ${reason}${question ? ` — soru: ${question.text}` : ""}`);
+  emitEvent(graphRootDir, { type: "needs_decision", nodeId: node.id, message: reason, data: { blocked: true, question } });
+}
+
+/**
+ * `markBlocked` sonrası Telegram cevabını uygular. `opt:<i>` (mimari karar seçeneği) →
+ * seçim `## Hata geçmişi`'ne "karar (kullanıcı)" olarak yazılır (görev yeniden
+ * çalışınca bağlam paketinde görünür) ve epic karar günlüğüne (13.11) işlenir, görev
+ * `pending`'e döner. retry → pending, skip → skipped. stop → görev `pending`'e döner
+ * (otopilot yeniden başlatılınca tekrar denenir/sorulur), çağıran taraf döngüyü durdurur.
+ */
+export function applyBlockedAnswer(
+  graph: Graph,
+  graphRootDir: string,
+  node: GraphNode,
+  answer: string,
+  question?: AgentQuestion,
+): ApprovalDecision {
+  let decision: ApprovalDecision;
+  let line: string;
+  if (answer.startsWith(OPTION_VALUE_PREFIX) && question) {
+    const chosen = question.options[Number(answer.slice(OPTION_VALUE_PREFIX.length))] ?? answer;
+    decision = "retry";
+    line = `${node.id} karar (kullanıcı): ${question.text} → ${chosen}`;
+    // Epic düğümü graph'ta yoksa (ör. elle oluşturulmuş tek görev) günlük düğümü açılamaz.
+    if (node.epicId && graph.nodesById.get(node.epicId)?.kind === "epic") {
+      recordDecision(graph, {
+        epicId: node.epicId,
+        nodeId: node.id,
+        summary: `${question.text} → ${chosen}`,
+        decidedBy: "user (Telegram)",
+        optionsCount: question.options.length,
+      });
+    }
+  } else {
+    decision = answer === "skip" || answer === "stop" ? answer : "retry";
+    line = `${node.id} karar: ${decision}`;
+  }
+  setFrontmatter(graph, node.id, { status: decision === "skip" ? "skipped" : "pending" });
+  appendErrorHistoryLine(node.filePath, line);
+  emitEvent(graphRootDir, { type: "decision_answered", nodeId: node.id, data: { decision, blocked: true } });
+  return decision;
 }
 
 /**

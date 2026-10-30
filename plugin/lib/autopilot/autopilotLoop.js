@@ -15,10 +15,10 @@ import { ConfigSchema } from "../schema/index.js";
 import { emitEvent } from "./eventBus.js";
 import { classifyLimitError } from "./limitClassifier.js";
 import { planLimitWait } from "./limitWait.js";
-import { needsApproval, notifyDeadlock, notifyLimit, requestApproval } from "./approvalFlow.js";
+import { applyBlockedAnswer, markBlocked, needsRiskApproval, notifyDeadlock, notifyLimit, requestApproval, } from "./approvalFlow.js";
 import { resolveTeamRoute } from "../team/assign.js";
 import { escalateTeamNode } from "../team/teamEscalate.js";
-import { epicDoneMessage, finishedMessage, resumeMessage } from "./messages.js";
+import { blockedDecisionMessage, epicDoneMessage, finishedMessage, resumeMessage } from "./messages.js";
 import { isWithinQuietHours } from "./quietHours.js";
 import { checkoutBranch, commitAll, epicBranchName, epicsListText, expandCandidateInScope, expandHeadless, helpText, inScope, parseRunTarget, pushCurrentBranch, scopeDone, } from "./epicRun.js";
 /**
@@ -108,6 +108,12 @@ async function executeNodeWithLimitHandling(nodeId, opts) {
             }
             return { kind: "done" };
         }
+        if (result.blocked) {
+            // Agent karar bekliyor: escalation/failNode/commit YOK (bkz. `markBlocked`).
+            const reason = result.blockedReason ?? "(neden belirtilmedi)";
+            markBlocked(loadFresh(graphRootDir).graph, graphRootDir, node, reason, result.question);
+            return { kind: "blocked", reason, question: result.question };
+        }
         if (!result.rateLimited) {
             // Roadmap 13.5 — ekip modunda doğrudan `failed` DEĞİL: önce escalation zinciri
             // (junior(haiku)→junior(sonnet)→senior, tester(haiku)→tester(upgrade_to)) denenir.
@@ -191,6 +197,10 @@ export async function runAutopilotLoop(options) {
     // `idle_wait` açıkken kapsam bitti ya da genişletme başarısız oldu: yeni bir `/run`
     // gelene kadar yalnız komut dinlenir.
     let waitingForCommand = false;
+    // Faz 12 — `blocked` görevlerin soruları döngüyü BEKLETMEZ (bağımsız işler sürsün):
+    // `ask()` arka planda bekler, cevap her turun başında `pollOnce` sonrası uygulanır.
+    const blockedAsks = new Map();
+    const pollForApproval = () => poller.pollOnce(0);
     poller.onCommandMessage((_chatId, command, args) => {
         switch (command) {
             case "/run": {
@@ -255,6 +265,19 @@ export async function runAutopilotLoop(options) {
         await poller.pollOnce(0);
         if (stopRequested)
             return { processedCount, stopReason: "user_stop" };
+        for (const [nodeId, ask] of blockedAsks) {
+            if (ask.answer === undefined)
+                continue;
+            blockedAsks.delete(nodeId);
+            const g = loadFresh(graphRootDir).graph;
+            const node = g.nodesById.get(nodeId);
+            if (!node)
+                continue;
+            const decision = applyBlockedAnswer(g, graphRootDir, node, ask.answer, ask.question);
+            if (decision === "stop")
+                return { processedCount, stopReason: "user_stop" };
+            idleWaitingNoticeSent = false;
+        }
         if (opts.maxNodes !== undefined && processedCount >= opts.maxNodes) {
             return { processedCount, stopReason: "finished" };
         }
@@ -287,9 +310,40 @@ export async function runAutopilotLoop(options) {
         const readyInScope = next.ready.filter((n) => inScope(n, scope));
         if (readyInScope.length > 0) {
             idleWaitingNoticeSent = false;
-            const outcome = await executeNodeWithLimitHandling(readyInScope[0].id, opts);
+            const target = readyInScope[0];
+            // Roadmap 12.6 — `risk: high` görev BAŞLAMADAN bir kez sorulur (`approved: true` kalıcı).
+            if (needsRiskApproval(target, config, graph)) {
+                const approval = await requestApproval({
+                    graph,
+                    graphRootDir,
+                    config,
+                    notifier,
+                    lang,
+                    node: target,
+                    attempts: 0,
+                    lastError: "",
+                    kind: "risk",
+                    sleep,
+                    poll: pollForApproval,
+                    pollIntervalMs: opts.pollIntervalMs,
+                });
+                if (approval.decision === "stop")
+                    return { processedCount, stopReason: "user_stop" };
+                continue;
+            }
+            const outcome = await executeNodeWithLimitHandling(target.id, opts);
             if (outcome.kind === "stop")
                 return { processedCount, stopReason: outcome.reason };
+            if (outcome.kind === "blocked") {
+                const ask = { question: outcome.question };
+                blockedAsks.set(target.id, ask);
+                const msg = blockedDecisionMessage(lang, { nodeId: target.id, reason: outcome.reason, question: outcome.question });
+                notifier.ask(msg.text, msg.buttons ?? []).then((answer) => {
+                    ask.answer = answer;
+                }, 
+                // Soru gönderilemedi: görev needs_decision kalır (/questions + hatırlatma), döngü düşmez.
+                () => blockedAsks.delete(target.id));
+            }
             if (outcome.kind === "done") {
                 processedCount += 1;
                 await handleEpicCompletionIfAny(readyInScope[0].id, opts);
@@ -317,11 +371,14 @@ export async function runAutopilotLoop(options) {
             continue;
         }
         const deadlock = computeDeadlockReport(graph);
-        if (deadlock.isDeadlocked) {
+        // Cevabı beklenen bir `blocked` sorusu varsa kilit geçicidir — cevap gelince açılır.
+        if (deadlock.isDeadlocked && blockedAsks.size === 0) {
             await notifyDeadlock({ graphRootDir, notifier, lang, reasons: deadlock.reasons });
             return { processedCount, stopReason: "deadlock" };
         }
-        const needingApproval = [...graph.nodesById.values()].find((n) => n.kind === "task" && needsApproval(n, config));
+        // Yalnız `failed` görevler: risk onayı yukarıda, görev başlamadan sorulur (hazır olmayan
+        // ya da bitmiş `risk: high` görevler burada bir daha sorulmaz).
+        const needingApproval = [...graph.nodesById.values()].find((n) => n.kind === "task" && n.frontmatter.status === "failed");
         if (needingApproval) {
             const outcome = await requestApproval({
                 graph,
@@ -332,6 +389,9 @@ export async function runAutopilotLoop(options) {
                 node: needingApproval,
                 attempts: Number(needingApproval.frontmatter.attempts ?? 1),
                 lastError: lastErrorLine(needingApproval),
+                sleep,
+                poll: pollForApproval,
+                pollIntervalMs: opts.pollIntervalMs,
             });
             if (outcome.decision === "stop")
                 return { processedCount, stopReason: "user_stop" };

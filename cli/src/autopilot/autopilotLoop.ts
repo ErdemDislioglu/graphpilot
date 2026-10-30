@@ -9,7 +9,7 @@ import { computeStatusSummary } from "../status.js";
 import { resolveRoute } from "../route.js";
 import { writeContextFile } from "../context.js";
 import { readAgentDefinition } from "../agentFile.js";
-import { runNodeHeadlessWithRetry, type ClaudeHeadlessSpawner } from "../runModeB.js";
+import { runNodeHeadlessWithRetry, type AgentQuestion, type ClaudeHeadlessSpawner } from "../runModeB.js";
 import { failNode } from "../fail.js";
 import { setFrontmatter } from "../set.js";
 import { ConfigSchema, type Config } from "../schema/index.js";
@@ -17,10 +17,17 @@ import type { Graph } from "../graph/types.js";
 import { emitEvent } from "./eventBus.js";
 import { classifyLimitError } from "./limitClassifier.js";
 import { planLimitWait } from "./limitWait.js";
-import { needsApproval, notifyDeadlock, notifyLimit, requestApproval } from "./approvalFlow.js";
+import {
+  applyBlockedAnswer,
+  markBlocked,
+  needsRiskApproval,
+  notifyDeadlock,
+  notifyLimit,
+  requestApproval,
+} from "./approvalFlow.js";
 import { resolveTeamRoute } from "../team/assign.js";
 import { escalateTeamNode } from "../team/teamEscalate.js";
-import { epicDoneMessage, finishedMessage, resumeMessage, type Lang } from "./messages.js";
+import { blockedDecisionMessage, epicDoneMessage, finishedMessage, resumeMessage, type Lang } from "./messages.js";
 import type { Notifier } from "./notifier.js";
 import type { TelegramPoller } from "./telegramPoller.js";
 import { isWithinQuietHours } from "./quietHours.js";
@@ -138,7 +145,11 @@ async function waitWhilePolling(
   return shouldStop();
 }
 
-type NodeOutcome = { kind: "done" } | { kind: "failed" } | { kind: "stop"; reason: AutopilotStopReason };
+type NodeOutcome =
+  | { kind: "done" }
+  | { kind: "failed" }
+  | { kind: "blocked"; reason: string; question?: AgentQuestion }
+  | { kind: "stop"; reason: AutopilotStopReason };
 
 /**
  * Bir düğümü, kısa rate-limit retry'ları (Faz 9.2, `runNodeHeadlessWithRetry`) tükense
@@ -189,6 +200,13 @@ async function executeNodeWithLimitHandling(
         commitAll(opts.projectRoot ?? dirname(graphRootDir), `gp(${node.id}): ${summary}`, opts.git);
       }
       return { kind: "done" };
+    }
+
+    if (result.blocked) {
+      // Agent karar bekliyor: escalation/failNode/commit YOK (bkz. `markBlocked`).
+      const reason = result.blockedReason ?? "(neden belirtilmedi)";
+      markBlocked(loadFresh(graphRootDir).graph, graphRootDir, node, reason, result.question);
+      return { kind: "blocked", reason, question: result.question };
     }
 
     if (!result.rateLimited) {
@@ -283,6 +301,10 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
   // `idle_wait` açıkken kapsam bitti ya da genişletme başarısız oldu: yeni bir `/run`
   // gelene kadar yalnız komut dinlenir.
   let waitingForCommand = false;
+  // Faz 12 — `blocked` görevlerin soruları döngüyü BEKLETMEZ (bağımsız işler sürsün):
+  // `ask()` arka planda bekler, cevap her turun başında `pollOnce` sonrası uygulanır.
+  const blockedAsks = new Map<string, { question?: AgentQuestion; answer?: string }>();
+  const pollForApproval = () => poller.pollOnce(0);
 
   poller.onCommandMessage((_chatId, command, args) => {
     switch (command) {
@@ -352,6 +374,16 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
   for (;;) {
     await poller.pollOnce(0);
     if (stopRequested) return { processedCount, stopReason: "user_stop" };
+    for (const [nodeId, ask] of blockedAsks) {
+      if (ask.answer === undefined) continue;
+      blockedAsks.delete(nodeId);
+      const g = loadFresh(graphRootDir).graph;
+      const node = g.nodesById.get(nodeId);
+      if (!node) continue;
+      const decision = applyBlockedAnswer(g, graphRootDir, node, ask.answer, ask.question);
+      if (decision === "stop") return { processedCount, stopReason: "user_stop" };
+      idleWaitingNoticeSent = false;
+    }
     if (opts.maxNodes !== undefined && processedCount >= opts.maxNodes) {
       return { processedCount, stopReason: "finished" };
     }
@@ -387,8 +419,40 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
 
     if (readyInScope.length > 0) {
       idleWaitingNoticeSent = false;
-      const outcome = await executeNodeWithLimitHandling(readyInScope[0].id, opts);
+      const target = readyInScope[0];
+      // Roadmap 12.6 — `risk: high` görev BAŞLAMADAN bir kez sorulur (`approved: true` kalıcı).
+      if (needsRiskApproval(target, config, graph)) {
+        const approval = await requestApproval({
+          graph,
+          graphRootDir,
+          config,
+          notifier,
+          lang,
+          node: target,
+          attempts: 0,
+          lastError: "",
+          kind: "risk",
+          sleep,
+          poll: pollForApproval,
+          pollIntervalMs: opts.pollIntervalMs,
+        });
+        if (approval.decision === "stop") return { processedCount, stopReason: "user_stop" };
+        continue;
+      }
+      const outcome = await executeNodeWithLimitHandling(target.id, opts);
       if (outcome.kind === "stop") return { processedCount, stopReason: outcome.reason };
+      if (outcome.kind === "blocked") {
+        const ask: { question?: AgentQuestion; answer?: string } = { question: outcome.question };
+        blockedAsks.set(target.id, ask);
+        const msg = blockedDecisionMessage(lang, { nodeId: target.id, reason: outcome.reason, question: outcome.question });
+        notifier.ask(msg.text, msg.buttons ?? []).then(
+          (answer) => {
+            ask.answer = answer;
+          },
+          // Soru gönderilemedi: görev needs_decision kalır (/questions + hatırlatma), döngü düşmez.
+          () => blockedAsks.delete(target.id),
+        );
+      }
       if (outcome.kind === "done") {
         processedCount += 1;
         await handleEpicCompletionIfAny(readyInScope[0].id, opts);
@@ -419,13 +483,16 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
     }
 
     const deadlock = computeDeadlockReport(graph);
-    if (deadlock.isDeadlocked) {
+    // Cevabı beklenen bir `blocked` sorusu varsa kilit geçicidir — cevap gelince açılır.
+    if (deadlock.isDeadlocked && blockedAsks.size === 0) {
       await notifyDeadlock({ graphRootDir, notifier, lang, reasons: deadlock.reasons });
       return { processedCount, stopReason: "deadlock" };
     }
 
+    // Yalnız `failed` görevler: risk onayı yukarıda, görev başlamadan sorulur (hazır olmayan
+    // ya da bitmiş `risk: high` görevler burada bir daha sorulmaz).
     const needingApproval = [...graph.nodesById.values()].find(
-      (n) => n.kind === "task" && needsApproval(n, config),
+      (n) => n.kind === "task" && n.frontmatter.status === "failed",
     );
     if (needingApproval) {
       const outcome = await requestApproval({
@@ -437,6 +504,9 @@ export async function runAutopilotLoop(options: AutopilotLoopOptions): Promise<A
         node: needingApproval,
         attempts: Number(needingApproval.frontmatter.attempts ?? 1),
         lastError: lastErrorLine(needingApproval),
+        sleep,
+        poll: pollForApproval,
+        pollIntervalMs: opts.pollIntervalMs,
       });
       if (outcome.decision === "stop") return { processedCount, stopReason: "user_stop" };
       idleWaitingNoticeSent = false;

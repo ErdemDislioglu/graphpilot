@@ -70,5 +70,6 @@ export declare const TaskFrontmatterSchema: z.ZodObject<{
         junior: "junior";
     }>>;
     verify: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    approved: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strict>;
 export type TaskFrontmatter = z.infer<typeof TaskFrontmatterSchema>;

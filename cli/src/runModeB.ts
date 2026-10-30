@@ -7,6 +7,48 @@ export interface HeadlessRunResult {
   stdout: string;
   stderr: string;
   status: number | null;
+  /** Agent son mesajında `blocked: <neden>` dedi — exit 0 olsa da iş bitmedi. */
+  blocked?: boolean;
+  blockedReason?: string;
+  /** `blocked` ile birlikte `soru:` + en az iki `seçenek:` satırı verildiyse (mimari karar). */
+  question?: AgentQuestion;
+}
+
+export interface AgentQuestion {
+  text: string;
+  options: string[];
+}
+
+/**
+ * `claude -p --output-format json` çıktısında agent'ın son mesajı `result` alanında
+ * (code.claude.com/docs/en/headless — "Output formats"; alan adı DOĞRULANMADI, pilot
+ * çıktısıyla uyumlu). JSON değilse ya da `result` yoksa ham stdout son mesaj sayılır.
+ */
+export function lastAgentMessage(stdout: string): string {
+  try {
+    const parsed: unknown = JSON.parse(stdout);
+    if (parsed && typeof parsed === "object" && typeof (parsed as { result?: unknown }).result === "string") {
+      return (parsed as { result: string }).result;
+    }
+  } catch {
+    // JSON değil — düz metin çıktı
+  }
+  return stdout;
+}
+
+/**
+ * Agent dönüş biçimi (plugin/skills/run/SKILL.md §2, agents/*.md): son mesajda satır başı
+ * `blocked: <neden>`. Ek olarak (otopilot mimari karar sorusu) `soru: <metin>` ve en az iki
+ * `seçenek: <metin>` satırı verilebilir — Telegram'da butonlara dönüşür.
+ */
+export function parseAgentReturn(message: string): { blockedReason?: string; question?: AgentQuestion } {
+  const blocked = /^blocked:[ \t]*(.*)$/im.exec(message);
+  if (!blocked) return {};
+  const blockedReason = blocked[1].trim() || "(neden belirtilmedi)";
+  const questionText = /^soru:[ \t]*(.+)$/im.exec(message)?.[1].trim();
+  const options = [...message.matchAll(/^seçenek:[ \t]*(.+)$/gim)].map((m) => m[1].trim()).filter(Boolean);
+  if (!questionText || options.length < 2) return { blockedReason };
+  return { blockedReason, question: { text: questionText, options } };
 }
 
 export type ClaudeHeadlessSpawner = (
@@ -71,7 +113,11 @@ export function runNodeHeadless(
 ): HeadlessRunResult {
   const args = buildHeadlessArgs(contextMarkdown, agentDef, route);
   const { stdout, stderr, status } = spawner(args);
-  return { ok: status === 0, stdout, stderr: stderr ?? "", status };
+  if (status !== 0) return { ok: false, stdout, stderr: stderr ?? "", status };
+  // Faz 12 — exit 0 "agent bitti" demek değil: agent `blocked:` dediyse görev done SAYILMAZ.
+  const { blockedReason, question } = parseAgentReturn(lastAgentMessage(stdout));
+  if (blockedReason === undefined) return { ok: true, stdout, stderr: stderr ?? "", status };
+  return { ok: false, stdout, stderr: stderr ?? "", status, blocked: true, blockedReason, question };
 }
 
 /**
@@ -128,7 +174,8 @@ export function runNodeHeadlessWithRetry(
   for (;;) {
     attempts += 1;
     const result = runNodeHeadless(contextMarkdown, agentDef, route, spawner);
-    if (result.ok) return { ...result, attempts, rateLimited: false };
+    // `blocked` bir karar bekliyor — gerekçe metni "rate limit" içerse bile retry edilmez.
+    if (result.ok || result.blocked) return { ...result, attempts, rateLimited: false };
 
     const rateLimited = isRateLimitSignal(`${result.stdout}\n${result.stderr}`);
     const canRetry = opts.enabled && rateLimited && attempts <= opts.maxRetries;

@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import matter from "gray-matter";
 import { describe, expect, it } from "vitest";
-import { needsApproval, notifyDeadlock, notifyLimit, requestApproval } from "../autopilot/approvalFlow.js";
+import {
+  applyBlockedAnswer,
+  markBlocked,
+  needsApproval,
+  notifyDeadlock,
+  notifyLimit,
+  requestApproval,
+} from "../autopilot/approvalFlow.js";
 import { readEvents } from "../autopilot/eventBus.js";
 import { MockNotifier } from "../autopilot/notifier.js";
 import { ConfigSchema } from "../schema/index.js";
@@ -38,26 +45,189 @@ const BASE_CONFIG = {
   budgets: { default_context: 8000, max_turns: 25 },
 };
 
+const RISK_CONFIG = { ...BASE_CONFIG, autopilot: { approvals: { on_risk_high: true } } };
+
+/** T01 (bağımlılık) + T02 (risk: high, T01'e bağlı) — T02'nin durumu/T01'in durumu parametre. */
+function riskGraphFiles(t02: Record<string, unknown>, t01Status = "done"): Record<string, string> {
+  return {
+    "a.md": frontmatter(TASK({ status: t01Status })),
+    "b.md": frontmatter(
+      TASK({ id: "E01-F01-T02", name: "b", risk: "high", depends_on: ["E01-F01-T01"], ...t02 }),
+    ),
+  };
+}
+
 describe("needsApproval", () => {
-  it("status: failed ise true döner", () => {
-    const node = { frontmatter: { status: "failed" } } as never;
-    expect(needsApproval(node, ConfigSchema.parse(BASE_CONFIG))).toBe(true);
+  it("status: failed ise true döner", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK({ status: "failed" })) }, async (graph) => {
+      expect(needsApproval(graph.nodesById.get("E01-F01-T01")!, ConfigSchema.parse(BASE_CONFIG), graph)).toBe(true);
+    });
   });
 
-  it("risk: high ama on_risk_high kapalıysa false döner", () => {
-    const node = { frontmatter: { status: "pending", risk: "high" } } as never;
-    expect(needsApproval(node, ConfigSchema.parse(BASE_CONFIG))).toBe(false);
+  it("risk: high ama on_risk_high kapalıysa false döner", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "pending" }), async (graph) => {
+      expect(needsApproval(graph.nodesById.get("E01-F01-T02")!, ConfigSchema.parse(BASE_CONFIG), graph)).toBe(false);
+    });
   });
 
-  it("risk: high ve on_risk_high açıksa true döner", () => {
-    const node = { frontmatter: { status: "pending", risk: "high" } } as never;
-    const config = ConfigSchema.parse({ ...BASE_CONFIG, autopilot: { approvals: { on_risk_high: true } } });
-    expect(needsApproval(node, config)).toBe(true);
+  it("pending + bağımlılıkları done + risk: high + on_risk_high → true", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "pending" }), async (graph) => {
+      expect(needsApproval(graph.nodesById.get("E01-F01-T02")!, ConfigSchema.parse(RISK_CONFIG), graph)).toBe(true);
+    });
   });
 
-  it("ne failed ne risk:high ise false döner", () => {
-    const node = { frontmatter: { status: "pending", risk: "low" } } as never;
-    expect(needsApproval(node, ConfigSchema.parse(BASE_CONFIG))).toBe(false);
+  it("done olan risk: high görev → false (eski sonsuz döngü)", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "done" }), async (graph) => {
+      expect(needsApproval(graph.nodesById.get("E01-F01-T02")!, ConfigSchema.parse(RISK_CONFIG), graph)).toBe(false);
+    });
+  });
+
+  it("approved: true → false (bir kez sorulur)", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "pending", approved: true }), async (graph) => {
+      expect(needsApproval(graph.nodesById.get("E01-F01-T02")!, ConfigSchema.parse(RISK_CONFIG), graph)).toBe(false);
+    });
+  });
+
+  it("bağımlılığı bitmemiş → false (henüz sıradaki değil)", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "pending" }, "pending"), async (graph) => {
+      expect(needsApproval(graph.nodesById.get("E01-F01-T02")!, ConfigSchema.parse(RISK_CONFIG), graph)).toBe(false);
+    });
+  });
+
+  it("ne failed ne risk:high ise false döner", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK({})) }, async (graph) => {
+      expect(needsApproval(graph.nodesById.get("E01-F01-T01")!, ConfigSchema.parse(RISK_CONFIG), graph)).toBe(false);
+    });
+  });
+});
+
+describe("requestApproval — risk yolu", () => {
+  it("approve → approved: true, status pending kalır, ayrı risk mesajı + Onayla/Atla/Durdur", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "pending" }), async (graph, dir) => {
+      const notifier = new MockNotifier({ answers: ["approve"] });
+      const outcome = await requestApproval({
+        graph,
+        graphRootDir: dir,
+        config: ConfigSchema.parse(RISK_CONFIG),
+        notifier,
+        lang: "tr",
+        node: graph.nodesById.get("E01-F01-T02")!,
+        attempts: 0,
+        lastError: "",
+        kind: "risk",
+      });
+      expect(outcome.decision).toBe("approve");
+      expect(notifier.asked[0].question).toBe('⚠️ E01-F01-T02 "b" riskli (risk: high). Başlatılsın mı?');
+      expect(notifier.asked[0].options.map((o) => o.value)).toEqual(["approve", "skip", "stop"]);
+      const after = matter(readFileSync(join(dir, "b.md"), "utf-8"));
+      expect(after.data.approved).toBe(true);
+      expect(after.data.status).toBe("pending");
+    });
+  });
+
+  it("zaman aşımı + timeout_action: stop → görev failed OLMAZ, pending kalır", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "pending" }), async (graph, dir) => {
+      const notifier = {
+        async send() {},
+        ask(): Promise<string> {
+          return new Promise(() => {});
+        },
+        async edit() {},
+      };
+      const outcome = await requestApproval({
+        graph,
+        graphRootDir: dir,
+        config: ConfigSchema.parse({
+          ...BASE_CONFIG,
+          autopilot: { approvals: { on_risk_high: true, timeout_minutes: 1, timeout_action: "stop" } },
+        }),
+        notifier,
+        lang: "tr",
+        node: graph.nodesById.get("E01-F01-T02")!,
+        attempts: 0,
+        lastError: "",
+        kind: "risk",
+        sleep: async () => {},
+      });
+      expect(outcome).toEqual({ nodeId: "E01-F01-T02", decision: "stop", timedOut: true });
+      const after = matter(readFileSync(join(dir, "b.md"), "utf-8"));
+      expect(after.data.status).toBe("pending");
+      expect(after.data.approved).toBeUndefined();
+    });
+  });
+
+  it("poll verilirse bekleme parçalanır ve her parça arasında poll edilir (Telegram cevabı ancak böyle gelir)", async () => {
+    await withTempGraphAsync(riskGraphFiles({ status: "pending" }), async (graph, dir) => {
+      let resolveAsk: (v: string) => void = () => {};
+      const notifier = {
+        async send() {},
+        ask(): Promise<string> {
+          return new Promise<string>((r) => {
+            resolveAsk = r;
+          });
+        },
+        async edit() {},
+      };
+      let polls = 0;
+      const outcome = await requestApproval({
+        graph,
+        graphRootDir: dir,
+        config: ConfigSchema.parse(RISK_CONFIG),
+        notifier,
+        lang: "tr",
+        node: graph.nodesById.get("E01-F01-T02")!,
+        attempts: 0,
+        lastError: "",
+        kind: "risk",
+        sleep: async () => {},
+        pollIntervalMs: 60_000,
+        poll: async () => {
+          polls += 1;
+          if (polls === 3) resolveAsk("skip");
+        },
+      });
+      expect(outcome).toEqual({ nodeId: "E01-F01-T02", decision: "skip", timedOut: false });
+      expect(polls).toBe(3);
+      expect(matter(readFileSync(join(dir, "b.md"), "utf-8")).data.status).toBe("skipped");
+    });
+  });
+});
+
+describe("markBlocked / applyBlockedAnswer", () => {
+  it("blocked → needs_decision + Hata geçmişi; 'retry' → pending", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK({ status: "running" })) }, async (graph, dir) => {
+      const node = graph.nodesById.get("E01-F01-T01")!;
+      markBlocked(graph, dir, node, "API anahtarı yok");
+      let after = matter(readFileSync(join(dir, "a.md"), "utf-8"));
+      expect(after.data.status).toBe("needs_decision");
+      expect(after.content).toContain("E01-F01-T01 blocked: API anahtarı yok");
+
+      expect(applyBlockedAnswer(graph, dir, node, "retry")).toBe("retry");
+      after = matter(readFileSync(join(dir, "a.md"), "utf-8"));
+      expect(after.data.status).toBe("pending");
+    });
+  });
+
+  it("mimari karar seçeneği (opt:1) → seçim Hata geçmişi'ne 'karar (kullanıcı)' olarak yazılır, pending", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK({ status: "running" })) }, async (graph, dir) => {
+      const node = graph.nodesById.get("E01-F01-T01")!;
+      const question = { text: "Hangi veritabanı?", options: ["PostgreSQL", "SQLite"] };
+      markBlocked(graph, dir, node, "veri modeli kararı", question);
+      expect(applyBlockedAnswer(graph, dir, node, "opt:1", question)).toBe("retry");
+      const after = matter(readFileSync(join(dir, "a.md"), "utf-8"));
+      expect(after.data.status).toBe("pending");
+      expect(after.content).toContain("E01-F01-T01 karar (kullanıcı): Hangi veritabanı? → SQLite");
+    });
+  });
+
+  it("'skip' → skipped; 'stop' → pending (failed değil) ve stop döner", async () => {
+    await withTempGraphAsync({ "a.md": frontmatter(TASK({ status: "needs_decision" })) }, async (graph, dir) => {
+      const node = graph.nodesById.get("E01-F01-T01")!;
+      expect(applyBlockedAnswer(graph, dir, node, "stop")).toBe("stop");
+      expect(matter(readFileSync(join(dir, "a.md"), "utf-8")).data.status).toBe("pending");
+      expect(applyBlockedAnswer(graph, dir, node, "skip")).toBe("skip");
+      expect(matter(readFileSync(join(dir, "a.md"), "utf-8")).data.status).toBe("skipped");
+    });
   });
 });
 

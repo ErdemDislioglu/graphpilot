@@ -41,4 +41,10 @@ başarısız denemesinin KISA ÖZETİ (ne denendi, hangi hata) — denemenin tam
 - Danışmanlık modu dışında son mesajın YALNIZ şu olsun: `done` ya da `blocked: <neden>`; varsa ek satır
   `bulgu: <tek satır>`. Handoff'u ya da yaptıklarını rapora tekrar yazma — yönetici
   Handoff'u gerekirse dosyadan okur.
+- **Karar sorusu (otopilot):** Mimari bir tercih (kütüphane, veri modeli, arayüz sözleşmesi)
+  senin kararın değilse `blocked: <neden>` satırının altına `soru: <tek cümle>` ve 2–4 satır
+  `seçenek: <kısa metin>` ekle (her satır başta, başka biçim yok). Otopilot bunları
+  kullanıcıya Telegram'da buton olarak sorar; seçim düğümünün `## Hata geçmişi`'ne
+  `karar (kullanıcı): <soru> → <seçenek>` olarak yazılır ve görev yeniden başlar —
+  bu satırı görürsen o karara uy, tekrar sorma.
 - Handoff'u, notları ve dönüşünü brief'in dilinde yaz (brief Türkçeyse Türkçe).

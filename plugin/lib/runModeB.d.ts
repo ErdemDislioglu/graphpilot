@@ -4,7 +4,31 @@ export interface HeadlessRunResult {
     stdout: string;
     stderr: string;
     status: number | null;
+    /** Agent son mesajında `blocked: <neden>` dedi — exit 0 olsa da iş bitmedi. */
+    blocked?: boolean;
+    blockedReason?: string;
+    /** `blocked` ile birlikte `soru:` + en az iki `seçenek:` satırı verildiyse (mimari karar). */
+    question?: AgentQuestion;
 }
+export interface AgentQuestion {
+    text: string;
+    options: string[];
+}
+/**
+ * `claude -p --output-format json` çıktısında agent'ın son mesajı `result` alanında
+ * (code.claude.com/docs/en/headless — "Output formats"; alan adı DOĞRULANMADI, pilot
+ * çıktısıyla uyumlu). JSON değilse ya da `result` yoksa ham stdout son mesaj sayılır.
+ */
+export declare function lastAgentMessage(stdout: string): string;
+/**
+ * Agent dönüş biçimi (plugin/skills/run/SKILL.md §2, agents/*.md): son mesajda satır başı
+ * `blocked: <neden>`. Ek olarak (otopilot mimari karar sorusu) `soru: <metin>` ve en az iki
+ * `seçenek: <metin>` satırı verilebilir — Telegram'da butonlara dönüşür.
+ */
+export declare function parseAgentReturn(message: string): {
+    blockedReason?: string;
+    question?: AgentQuestion;
+};
 export type ClaudeHeadlessSpawner = (args: string[]) => {
     stdout: string;
     stderr?: string;
