@@ -13,6 +13,8 @@ export interface HeadlessRunResult {
 export interface AgentQuestion {
     text: string;
     options: string[];
+    /** Agent'ın `(önerilen)` diye işaretlediği seçenek — risk'i high olmayan görevde otomatik seçilir. */
+    recommended?: number;
 }
 /**
  * `claude -p --output-format json` çıktısında agent'ın son mesajı `result` alanında

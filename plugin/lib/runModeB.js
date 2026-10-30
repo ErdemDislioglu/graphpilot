@@ -1,5 +1,6 @@
 import { execSync, spawnSync } from "node:child_process";
 import { HTTP_429_RE } from "./autopilot/limitClassifier.js";
+const RECOMMENDED_MARK_RE = /\s*\((önerilen|recommended)\)\s*$/i;
 /**
  * `claude -p --output-format json` çıktısında agent'ın son mesajı `result` alanında
  * (code.claude.com/docs/en/headless — "Output formats"; alan adı DOĞRULANMADI, pilot
@@ -28,10 +29,15 @@ export function parseAgentReturn(message) {
         return {};
     const blockedReason = blocked[1].trim() || "(neden belirtilmedi)";
     const questionText = /^soru:[ \t]*(.+)$/im.exec(message)?.[1].trim();
-    const options = [...message.matchAll(/^seçenek:[ \t]*(.+)$/gim)].map((m) => m[1].trim()).filter(Boolean);
-    if (!questionText || options.length < 2)
+    const rawOptions = [...message.matchAll(/^seçenek:[ \t]*(.+)$/gim)].map((m) => m[1].trim()).filter(Boolean);
+    if (!questionText || rawOptions.length < 2)
         return { blockedReason };
-    return { blockedReason, question: { text: questionText, options } };
+    const marked = rawOptions.findIndex((o) => RECOMMENDED_MARK_RE.test(o));
+    const options = rawOptions.map((o) => o.replace(RECOMMENDED_MARK_RE, ""));
+    const question = { text: questionText, options };
+    if (marked !== -1)
+        question.recommended = marked;
+    return { blockedReason, question };
 }
 const defaultSpawner = (args) => {
     const result = spawnSync("claude", args, { encoding: "utf-8" });

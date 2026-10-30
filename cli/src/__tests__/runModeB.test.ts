@@ -71,6 +71,14 @@ describe("runNodeHeadless — agent 'blocked:' dönüşü (Faz 12)", () => {
     expect(r.question).toEqual({ text: "Hangi veritabanı?", options: ["PostgreSQL", "SQLite"] });
   });
 
+  it("'(önerilen)' işareti seçenekten silinir ve recommended indeksi olur", () => {
+    expect(parseAgentReturn("blocked: x\nsoru: y?\nseçenek: a\nseçenek: b (önerilen)").question).toEqual({
+      text: "y?",
+      options: ["a", "b"],
+      recommended: 1,
+    });
+  });
+
   it("tek seçenekli soru yok sayılır (buton anlamsız) — yalnız blocked", () => {
     expect(parseAgentReturn("blocked: x\nsoru: y?\nseçenek: a")).toEqual({ blockedReason: "x" });
   });

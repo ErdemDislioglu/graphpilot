@@ -60,7 +60,14 @@ export declare function markBlocked(graph: Graph, graphRootDir: string, node: Gr
  * `pending`'e döner. retry → pending, skip → skipped. stop → görev `pending`'e döner
  * (otopilot yeniden başlatılınca tekrar denenir/sorulur), çağıran taraf döngüyü durdurur.
  */
-export declare function applyBlockedAnswer(graph: Graph, graphRootDir: string, node: GraphNode, answer: string, question?: AgentQuestion): ApprovalDecision;
+export declare function applyBlockedAnswer(graph: Graph, graphRootDir: string, node: GraphNode, answer: string, question?: AgentQuestion, decidedBy?: "kullanıcı" | "otomatik"): ApprovalDecision;
+/**
+ * Kullanıcı isteği (2026-10-30) — Telegram'dan yalnız `risk: high` görevler sorulur.
+ * Diğerlerinde `blocked` kararı otomatik: agent'ın `(önerilen)` seçeneği (işaret yoksa
+ * ilki) seçilip görev yeniden çalışır; soru yoksa görev atlanır (bağımlıları bekler).
+ * `failed` görevlerin onay akışı bundan etkilenmez.
+ */
+export declare function autoBlockedAnswer(question?: AgentQuestion): string;
 /**
  * Roadmap 12.6 — deadlock için düzeltici tek bir "doğru" eylem yok (hangi düğümü
  * tekrar/atla/durdur seçilecek belirsiz — kökteki düğüm genelde zaten kendi `failed`

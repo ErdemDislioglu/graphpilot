@@ -4,6 +4,7 @@ import matter from "gray-matter";
 import { describe, expect, it } from "vitest";
 import {
   applyBlockedAnswer,
+  autoBlockedAnswer,
   markBlocked,
   needsApproval,
   notifyDeadlock,
@@ -403,5 +404,13 @@ describe("notifyLimit", () => {
       expect(notifier.sent[0]).toContain("18/26");
       expect(readEvents(dir).map((e) => e.type)).toEqual(["limit_hit"]);
     });
+  });
+});
+
+describe("autoBlockedAnswer", () => {
+  it("soru yoksa skip; önerilen varsa o, yoksa ilk seçenek", () => {
+    expect(autoBlockedAnswer()).toBe("skip");
+    expect(autoBlockedAnswer({ text: "q", options: ["a", "b"], recommended: 1 })).toBe("opt:1");
+    expect(autoBlockedAnswer({ text: "q", options: ["a", "b"] })).toBe("opt:0");
   });
 });

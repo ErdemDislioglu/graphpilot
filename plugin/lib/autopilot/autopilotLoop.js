@@ -15,7 +15,7 @@ import { ConfigSchema } from "../schema/index.js";
 import { emitEvent } from "./eventBus.js";
 import { classifyLimitError } from "./limitClassifier.js";
 import { planLimitWait } from "./limitWait.js";
-import { applyBlockedAnswer, markBlocked, needsRiskApproval, notifyDeadlock, notifyLimit, requestApproval, } from "./approvalFlow.js";
+import { applyBlockedAnswer, autoBlockedAnswer, markBlocked, needsRiskApproval, notifyDeadlock, notifyLimit, requestApproval, } from "./approvalFlow.js";
 import { resolveTeamRoute } from "../team/assign.js";
 import { escalateTeamNode } from "../team/teamEscalate.js";
 import { blockedDecisionMessage, epicDoneMessage, finishedMessage, resumeMessage } from "./messages.js";
@@ -334,7 +334,19 @@ export async function runAutopilotLoop(options) {
             const outcome = await executeNodeWithLimitHandling(target.id, opts);
             if (outcome.kind === "stop")
                 return { processedCount, stopReason: outcome.reason };
-            if (outcome.kind === "blocked") {
+            if (outcome.kind === "blocked" && target.frontmatter.risk !== "high") {
+                const g = loadFresh(graphRootDir).graph;
+                const node = g.nodesById.get(target.id);
+                if (node) {
+                    const decision = applyBlockedAnswer(g, graphRootDir, node, autoBlockedAnswer(outcome.question), outcome.question, "otomatik");
+                    const chosen = outcome.question?.options[outcome.question.recommended ?? 0];
+                    let what = lang === "tr" ? `önerilen seçildi: ${chosen}` : `picked recommended: ${chosen}`;
+                    if (decision === "skip")
+                        what = lang === "tr" ? "atlandı" : "skipped";
+                    await notifier.send(lang === "tr" ? `⛔ ${target.id} durdu: ${outcome.reason}. Otomatik karar — ${what}.` : `⛔ ${target.id} stopped: ${outcome.reason}. Automatic decision — ${what}.`);
+                }
+            }
+            else if (outcome.kind === "blocked") {
                 const ask = { question: outcome.question };
                 blockedAsks.set(target.id, ask);
                 const msg = blockedDecisionMessage(lang, { nodeId: target.id, reason: outcome.reason, question: outcome.question });

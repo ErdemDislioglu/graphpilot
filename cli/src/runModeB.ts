@@ -17,7 +17,11 @@ export interface HeadlessRunResult {
 export interface AgentQuestion {
   text: string;
   options: string[];
+  /** Agent'ın `(önerilen)` diye işaretlediği seçenek — risk'i high olmayan görevde otomatik seçilir. */
+  recommended?: number;
 }
+
+const RECOMMENDED_MARK_RE = /\s*\((önerilen|recommended)\)\s*$/i;
 
 /**
  * `claude -p --output-format json` çıktısında agent'ın son mesajı `result` alanında
@@ -46,9 +50,13 @@ export function parseAgentReturn(message: string): { blockedReason?: string; que
   if (!blocked) return {};
   const blockedReason = blocked[1].trim() || "(neden belirtilmedi)";
   const questionText = /^soru:[ \t]*(.+)$/im.exec(message)?.[1].trim();
-  const options = [...message.matchAll(/^seçenek:[ \t]*(.+)$/gim)].map((m) => m[1].trim()).filter(Boolean);
-  if (!questionText || options.length < 2) return { blockedReason };
-  return { blockedReason, question: { text: questionText, options } };
+  const rawOptions = [...message.matchAll(/^seçenek:[ \t]*(.+)$/gim)].map((m) => m[1].trim()).filter(Boolean);
+  if (!questionText || rawOptions.length < 2) return { blockedReason };
+  const marked = rawOptions.findIndex((o) => RECOMMENDED_MARK_RE.test(o));
+  const options = rawOptions.map((o) => o.replace(RECOMMENDED_MARK_RE, ""));
+  const question: AgentQuestion = { text: questionText, options };
+  if (marked !== -1) question.recommended = marked;
+  return { blockedReason, question };
 }
 
 export type ClaudeHeadlessSpawner = (

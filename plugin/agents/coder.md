@@ -52,8 +52,9 @@ görevleri sırayla yap; her biri için kendi düğüm dosyasındaki Handoff'u a
   Handoff'u gerekirse dosyadan okur.
 - **Karar sorusu (otopilot):** Mimari bir tercih (kütüphane, veri modeli, arayüz sözleşmesi)
   senin kararın değilse `blocked: <neden>` satırının altına `soru: <tek cümle>` ve 2–4 satır
-  `seçenek: <kısa metin>` ekle (her satır başta, başka biçim yok). Otopilot bunları
-  kullanıcıya Telegram'da buton olarak sorar; seçim düğümünün `## Hata geçmişi`'ne
-  `karar (kullanıcı): <soru> → <seçenek>` olarak yazılır ve görev yeniden başlar —
+  `seçenek: <kısa metin>` ekle (her satır başta, başka biçim yok); tercih ettiğinin sonuna
+  ` (önerilen)` yaz. Otopilot `risk: high` görevde bunları Telegram'da buton olarak sorar,
+  diğer görevlerde önerileni kendisi seçer. Seçim düğümünün `## Hata geçmişi`'ne
+  `karar (kullanıcı|otomatik): <soru> → <seçenek>` olarak yazılır ve görev yeniden başlar —
   bu satırı görürsen o karara uy, tekrar sorma.
 - Handoff'u, notları ve dönüşünü brief'in dilinde yaz (brief Türkçeyse Türkçe).

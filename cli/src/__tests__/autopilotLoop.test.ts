@@ -686,10 +686,10 @@ describe("runAutopilotLoop — risk: high onayı (12.6 düzeltmesi)", () => {
 });
 
 describe("runAutopilotLoop — agent 'blocked:' dönüşü (Faz 12)", () => {
-  it("blocked → needs_decision, escalation/commit yok, bağımsız görev sürer; 'retry' ile tekrar çalışır", async () => {
+  it("risk: high blocked → needs_decision, escalation/commit yok, bağımsız görev sürer; 'retry' ile tekrar çalışır", async () => {
     await withTempGraphAsync(
       {
-        "a.md": taskFrontmatter({}),
+        "a.md": taskFrontmatter({ risk: "high" }),
         "b.md": taskFrontmatter({ id: "E01-F01-T02", name: "b" }),
         "config.yml":
           "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
@@ -765,10 +765,10 @@ describe("runAutopilotLoop — agent 'blocked:' dönüşü (Faz 12)", () => {
     );
   });
 
-  it("mimari karar sorusu: seçenekler buton olur, seçim Hata geçmişi'ne yazılıp görev yeniden çalışır", async () => {
+  it("risk: high görevde mimari karar sorusu: seçenekler buton olur, seçim Hata geçmişi'ne yazılıp görev yeniden çalışır", async () => {
     await withTempGraphAsync(
       {
-        "a.md": taskFrontmatter({}),
+        "a.md": taskFrontmatter({ risk: "high" }),
         "config.yml":
           "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
           "budgets: { default_context: 8000, max_turns: 25 }\nteam: { enabled: false }\n",
@@ -804,5 +804,68 @@ describe("runAutopilotLoop — agent 'blocked:' dönüşü (Faz 12)", () => {
         expect(contexts[1]).toContain("karar (kullanıcı): Hangi veritabanı? → PostgreSQL");
       },
     );
+  });
+});
+
+describe("runAutopilotLoop — risk'i high olmayan blocked görev sorulmaz (kullanıcı isteği)", () => {
+  const CFG =
+    "routing:\n  - when: {}\n    model: haiku\nescalation: [haiku]\nmax_attempts_per_model: 1\n" +
+    "budgets: { default_context: 8000, max_turns: 25 }\nteam: { enabled: false }\n";
+
+  it("soru varsa (önerilen) seçenek otomatik seçilir, görev yeniden çalışır, Telegram'a yalnız bilgi gider", async () => {
+    await withTempGraphAsync({ "a.md": taskFrontmatter({ risk: "med" }), "config.yml": CFG, "coder.md": CODER_MD }, async (_graph, dir) => {
+      const notifier = new MockNotifier();
+      const contexts: string[] = [];
+      const spawner: ClaudeHeadlessSpawner = (args) => {
+        contexts.push(args[1]);
+        const result =
+          contexts.length === 1
+            ? "blocked: veri modeli kararı\nsoru: Hangi veritabanı?\nseçenek: PostgreSQL\nseçenek: SQLite (önerilen)"
+            : "done";
+        return { stdout: JSON.stringify({ result }), stderr: "", status: 0 };
+      };
+      const result = await runAutopilotLoop({
+        graphRootDir: dir,
+        agentsDir: dir,
+        notifier,
+        poller: offlinePoller(),
+        lang: "tr",
+        spawner,
+        sleep: instantSleep,
+        shortRetrySleep: noopShortRetrySleep,
+      });
+      expect(result.stopReason).toBe("finished");
+      expect(notifier.asked).toHaveLength(0);
+      expect(notifier.sent).toContain("⛔ E01-F01-T01 durdu: veri modeli kararı. Otomatik karar — önerilen seçildi: SQLite.");
+      expect(contexts[1]).toContain("karar (otomatik): Hangi veritabanı? → SQLite");
+    });
+  });
+
+  it("soru yoksa görev atlanır, hiç soru sorulmaz", async () => {
+    await withTempGraphAsync({ "a.md": taskFrontmatter({}), "config.yml": CFG, "coder.md": CODER_MD }, async (_graph, dir) => {
+      const notifier = new MockNotifier();
+      // `skipped` görev "bitti" sayılmadığı için döngü kendiliğinden bitmez — 3. turda /stop.
+      let polls = 0;
+      const fetchFn = vi.fn().mockImplementation(async () => {
+        polls += 1;
+        const result = polls === 3 ? [{ update_id: 1, message: { message_id: 1, chat: { id: 7 }, text: "/stop" } }] : [];
+        return { json: async () => ({ ok: true, result }) };
+      });
+      const poller = new TelegramPoller(new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch), 7);
+      const result = await runAutopilotLoop({
+        graphRootDir: dir,
+        agentsDir: dir,
+        notifier,
+        poller,
+        lang: "tr",
+        spawner: () => ({ stdout: JSON.stringify({ result: "blocked: API anahtarı yok" }), stderr: "", status: 0 }),
+        sleep: instantSleep,
+        shortRetrySleep: noopShortRetrySleep,
+      });
+      expect(result.stopReason).toBe("user_stop");
+      expect(notifier.asked).toHaveLength(0);
+      expect(matter(readFileSync(join(dir, "a.md"), "utf-8")).data.status).toBe("skipped");
+      expect(notifier.sent[0]).toBe("⛔ E01-F01-T01 durdu: API anahtarı yok. Otomatik karar — atlandı.");
+    });
   });
 });

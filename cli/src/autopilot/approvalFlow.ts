@@ -210,31 +210,43 @@ export function applyBlockedAnswer(
   node: GraphNode,
   answer: string,
   question?: AgentQuestion,
+  decidedBy: "kullanıcı" | "otomatik" = "kullanıcı",
 ): ApprovalDecision {
   let decision: ApprovalDecision;
   let line: string;
   if (answer.startsWith(OPTION_VALUE_PREFIX) && question) {
     const chosen = question.options[Number(answer.slice(OPTION_VALUE_PREFIX.length))] ?? answer;
     decision = "retry";
-    line = `${node.id} karar (kullanıcı): ${question.text} → ${chosen}`;
+    line = `${node.id} karar (${decidedBy}): ${question.text} → ${chosen}`;
     // Epic düğümü graph'ta yoksa (ör. elle oluşturulmuş tek görev) günlük düğümü açılamaz.
     if (node.epicId && graph.nodesById.get(node.epicId)?.kind === "epic") {
       recordDecision(graph, {
         epicId: node.epicId,
         nodeId: node.id,
         summary: `${question.text} → ${chosen}`,
-        decidedBy: "user (Telegram)",
+        decidedBy: decidedBy === "otomatik" ? "autopilot (önerilen)" : "user (Telegram)",
         optionsCount: question.options.length,
       });
     }
   } else {
     decision = answer === "skip" || answer === "stop" ? answer : "retry";
-    line = `${node.id} karar: ${decision}`;
+    line = `${node.id} karar${decidedBy === "otomatik" ? " (otomatik)" : ""}: ${decision}`;
   }
   setFrontmatter(graph, node.id, { status: decision === "skip" ? "skipped" : "pending" });
   appendErrorHistoryLine(node.filePath, line);
-  emitEvent(graphRootDir, { type: "decision_answered", nodeId: node.id, data: { decision, blocked: true } });
+  emitEvent(graphRootDir, { type: "decision_answered", nodeId: node.id, data: { decision, blocked: true, decidedBy } });
   return decision;
+}
+
+/**
+ * Kullanıcı isteği (2026-10-30) — Telegram'dan yalnız `risk: high` görevler sorulur.
+ * Diğerlerinde `blocked` kararı otomatik: agent'ın `(önerilen)` seçeneği (işaret yoksa
+ * ilki) seçilip görev yeniden çalışır; soru yoksa görev atlanır (bağımlıları bekler).
+ * `failed` görevlerin onay akışı bundan etkilenmez.
+ */
+export function autoBlockedAnswer(question?: AgentQuestion): string {
+  if (!question) return "skip";
+  return `${OPTION_VALUE_PREFIX}${question.recommended ?? 0}`;
 }
 
 /**
