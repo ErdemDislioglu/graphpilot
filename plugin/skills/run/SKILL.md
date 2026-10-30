@@ -4,7 +4,7 @@ description: >-
   varsayılan AÇIK olduğu için görevler otomatik olarak junior/senior/tester/docs
   rollerine gider (Faz 13) — `config.yml`'de `team.enabled: false` ile kapatılabilir.
   Kullanıcı "/gp:run" yazdığında çalışır.
-argument-hint: "[--epic <id>] [--max-nodes N] [--dry-run]"
+argument-hint: "[--epic <id>] [--max-nodes N] [--dry-run] [--force]"
 ---
 
 # /gp:run

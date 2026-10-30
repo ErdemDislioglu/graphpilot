@@ -166,6 +166,7 @@ declare const EfficiencySchema: z.ZodObject<{
     small_project_warn_tasks: z.ZodDefault<z.ZodNumber>;
     worker_mode: z.ZodDefault<z.ZodBoolean>;
     worker_max_tasks: z.ZodDefault<z.ZodNumber>;
+    run_clear_warn_tokens: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strict>;
 export declare const DEFAULT_EFFICIENCY: {
     small_epic_max_features: number;
@@ -183,6 +184,7 @@ export declare const DEFAULT_EFFICIENCY: {
     small_project_warn_tasks: number;
     worker_mode: boolean;
     worker_max_tasks: number;
+    run_clear_warn_tokens: number;
 };
 export declare const DEFAULT_OPTIMIZATIONS: {
     readonly cache_friendly_order: true;
@@ -357,6 +359,7 @@ export declare const ConfigSchema: z.ZodObject<{
         small_project_warn_tasks: z.ZodDefault<z.ZodNumber>;
         worker_mode: z.ZodDefault<z.ZodBoolean>;
         worker_max_tasks: z.ZodDefault<z.ZodNumber>;
+        run_clear_warn_tokens: z.ZodDefault<z.ZodNumber>;
     }, z.core.$strict>>;
     workflow: z.ZodDefault<z.ZodObject<{
         branch_per_epic: z.ZodDefault<z.ZodBoolean>;

@@ -1,8 +1,9 @@
-import type { Optimizations } from "../schema/index.js";
+import type { EfficiencyConfig, Optimizations } from "../schema/index.js";
 export interface FastConfigResult {
     /** `.graph/` dizini hiç yoksa `false` — hook'un en hızlı çıkış yolu. */
     graphDirExists: boolean;
     optimizations: Optimizations;
+    efficiency: EfficiencyConfig;
 }
 /**
  * Faz 7.3 (ADR-005) — hook'lar **her** tool çağrısında ateşlenir (research.md § Plugin

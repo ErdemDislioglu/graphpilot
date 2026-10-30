@@ -256,6 +256,11 @@ const EfficiencySchema = z
     worker_mode: z.boolean().default(true),
     /** Bir worker en fazla bu kadar görev (zincir = görev sayısı) alıp çıkar — bağlamı sınırlar. */
     worker_max_tasks: z.number().int().positive().default(5),
+    /**
+     * Faz 15 — `/gp:run`/`/gp:team` yazıldığında oturum bağlamı bunu aşıyorsa hook komutu
+     * durdurup önce `/clear` önerir (plugin `/clear`'ı kendisi çalıştıramaz). 0 = kapalı.
+     */
+    run_clear_warn_tokens: z.number().int().nonnegative().default(70000),
 })
     .strict();
 /**

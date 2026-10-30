@@ -3,7 +3,7 @@ description: >-
   Ekip modu — görevleri tag'e göre doğru role (junior/senior/tester/docs) dağıtır,
   rutin kararları kendisi verir, kalanı için AskUserQuestion ile sorar (Faz 13).
   Kullanıcı "/gp:team" yazdığında çalışır. `config.yml`'de `team.enabled: true` gerekir.
-argument-hint: "[--epic <id>] [--max-nodes N]"
+argument-hint: "[--epic <id>] [--max-nodes N] [--force]"
 ---
 
 # /gp:team

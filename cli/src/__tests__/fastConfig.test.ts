@@ -23,6 +23,7 @@ describe("loadFastConfig — Faz 7.3, 9.6 kapsam eksiği (önceden sadece alt s�
           turn_limits: true,
           repo_map: true,
         },
+        efficiency: expect.objectContaining({ run_clear_warn_tokens: 70000 }),
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

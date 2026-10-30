@@ -1,13 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { ConfigSchema, DEFAULT_OPTIMIZATIONS } from "../schema/index.js";
-import type { Optimizations } from "../schema/index.js";
+import { ConfigSchema, DEFAULT_EFFICIENCY, DEFAULT_OPTIMIZATIONS } from "../schema/index.js";
+import type { EfficiencyConfig, Optimizations } from "../schema/index.js";
 
 export interface FastConfigResult {
   /** `.graph/` dizini hiç yoksa `false` — hook'un en hızlı çıkış yolu. */
   graphDirExists: boolean;
   optimizations: Optimizations;
+  efficiency: EfficiencyConfig;
 }
 
 /**
@@ -24,12 +25,12 @@ export interface FastConfigResult {
 export function loadFastConfig(cwd: string): FastConfigResult {
   const graphDir = join(cwd, ".graph");
   if (!existsSync(graphDir)) {
-    return { graphDirExists: false, optimizations: DEFAULT_OPTIMIZATIONS };
+    return { graphDirExists: false, optimizations: DEFAULT_OPTIMIZATIONS, efficiency: DEFAULT_EFFICIENCY };
   }
 
   const configPath = join(graphDir, "config.yml");
   if (!existsSync(configPath)) {
-    return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS };
+    return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS, efficiency: DEFAULT_EFFICIENCY };
   }
 
   try {
@@ -38,9 +39,10 @@ export function loadFastConfig(cwd: string): FastConfigResult {
     return {
       graphDirExists: true,
       optimizations: result.success ? result.data.optimizations : DEFAULT_OPTIMIZATIONS,
+      efficiency: result.success ? result.data.efficiency : DEFAULT_EFFICIENCY,
     };
   } catch {
-    return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS };
+    return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS, efficiency: DEFAULT_EFFICIENCY };
   }
 }
 

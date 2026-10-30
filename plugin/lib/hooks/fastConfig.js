@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { ConfigSchema, DEFAULT_OPTIMIZATIONS } from "../schema/index.js";
+import { ConfigSchema, DEFAULT_EFFICIENCY, DEFAULT_OPTIMIZATIONS } from "../schema/index.js";
 /**
  * Faz 7.3 (ADR-005) — hook'lar **her** tool çağrısında ateşlenir (research.md § Plugin
  * hook'ları ne zaman ateşlenir), `/gp:run` beklemez. Bu yüzden burada TAM `parseGraph`
@@ -16,11 +16,11 @@ import { ConfigSchema, DEFAULT_OPTIMIZATIONS } from "../schema/index.js";
 export function loadFastConfig(cwd) {
     const graphDir = join(cwd, ".graph");
     if (!existsSync(graphDir)) {
-        return { graphDirExists: false, optimizations: DEFAULT_OPTIMIZATIONS };
+        return { graphDirExists: false, optimizations: DEFAULT_OPTIMIZATIONS, efficiency: DEFAULT_EFFICIENCY };
     }
     const configPath = join(graphDir, "config.yml");
     if (!existsSync(configPath)) {
-        return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS };
+        return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS, efficiency: DEFAULT_EFFICIENCY };
     }
     try {
         const raw = parseYaml(readFileSync(configPath, "utf-8"));
@@ -28,10 +28,11 @@ export function loadFastConfig(cwd) {
         return {
             graphDirExists: true,
             optimizations: result.success ? result.data.optimizations : DEFAULT_OPTIMIZATIONS,
+            efficiency: result.success ? result.data.efficiency : DEFAULT_EFFICIENCY,
         };
     }
     catch {
-        return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS };
+        return { graphDirExists: true, optimizations: DEFAULT_OPTIMIZATIONS, efficiency: DEFAULT_EFFICIENCY };
     }
 }
 /** Hook'ların ortak kök yolu: hook girdisindeki `cwd` alanı (research.md — evrensel alan). */

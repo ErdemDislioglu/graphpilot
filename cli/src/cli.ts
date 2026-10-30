@@ -49,6 +49,7 @@ import { parseTranscriptUsage, summarizeTranscript } from "./metricsIngest.js";
 import { loadFastConfig } from "./hooks/fastConfig.js";
 import { computeTrimmedBashOutput } from "./hooks/trimBash.js";
 import { computeTrackToolUse } from "./hooks/trackToolUse.js";
+import { computeRunGuard, readContextTokens } from "./hooks/runGuard.js";
 import { appendMetric } from "./metrics.js";
 import { decideRunningNodeRecovery, findOrphanWipCommits } from "./recover.js";
 import { computeDeadlockReport } from "./deadlock.js";
@@ -1732,6 +1733,22 @@ export function buildCli(): Command {
         const out = computeTrimmedBashOutput(input, {
           graphDirExists: fast.graphDirExists,
           logTrimmingEnabled: fast.optimizations.log_trimming,
+        });
+        process.stdout.write(JSON.stringify(out));
+      }),
+    );
+
+  hookCmd
+    .command("run-guard")
+    .description("UserPromptExpansion — Faz 15: /gp:run uzun bir oturumda yazılırsa önce /clear önerir")
+    .action(
+      hookAction(() => {
+        const input = readStdinJson() as Parameters<typeof computeRunGuard>[0] & { cwd?: string };
+        const fast = loadFastConfig(input.cwd ?? process.cwd());
+        const out = computeRunGuard(input, {
+          graphDirExists: fast.graphDirExists,
+          thresholdTokens: fast.efficiency.run_clear_warn_tokens,
+          contextTokens: readContextTokens,
         });
         process.stdout.write(JSON.stringify(out));
       }),

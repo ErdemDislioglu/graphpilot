@@ -224,6 +224,7 @@ describe("ConfigSchema — Faz 14 efficiency (ölçek koruması)", () => {
       small_project_warn_tasks: 6,
       worker_mode: true,
       worker_max_tasks: 5,
+      run_clear_warn_tokens: 70000,
     });
     expect(ConfigSchema.parse(BASE).workflow).toEqual({
       branch_per_epic: false,
