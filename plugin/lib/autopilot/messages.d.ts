@@ -56,6 +56,7 @@ export declare function finishedMessage(lang: Lang, opts: {
     tokens: number;
     escalations: number;
     reportPath: string;
+    skippedCount?: number;
 }): TemplateMessage;
 /**
  * Roadmap 13.9 — yöneticinin kullanıcıya eskalasyonu (bir bulgu üzerinden). Örnekle

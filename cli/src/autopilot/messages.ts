@@ -143,13 +143,14 @@ export function resumeMessage(lang: Lang, opts: { nodeId: string }): TemplateMes
 
 export function finishedMessage(
   lang: Lang,
-  opts: { taskCount: number; tokens: number; escalations: number; reportPath: string },
+  opts: { taskCount: number; tokens: number; escalations: number; reportPath: string; skippedCount?: number },
 ): TemplateMessage {
   const tok = formatTokenCount(opts.tokens);
+  const skipped = opts.skippedCount ? (lang === "tr" ? ` (${opts.skippedCount} atlandı)` : ` (${opts.skippedCount} skipped)`) : "";
   const text =
     lang === "tr"
-      ? `🏁 Proje tamamlandı · ${opts.taskCount} görev · ~${tok} token · ${opts.escalations} yükseltme · rapor: ${opts.reportPath}`
-      : `🏁 Project complete · ${opts.taskCount} tasks · ~${tok} tokens · ${opts.escalations} escalations · report: ${opts.reportPath}`;
+      ? `🏁 Proje tamamlandı · ${opts.taskCount} görev${skipped} · ~${tok} token · ${opts.escalations} yükseltme · rapor: ${opts.reportPath}`
+      : `🏁 Project complete · ${opts.taskCount} tasks${skipped} · ~${tok} tokens · ${opts.escalations} escalations · report: ${opts.reportPath}`;
   return { text };
 }
 

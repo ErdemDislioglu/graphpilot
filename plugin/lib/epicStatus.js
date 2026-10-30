@@ -21,6 +21,7 @@ import { getChildren } from "./graph/types.js";
 export function computeEpicDone(graph, epicId) {
     const tasks = [...graph.nodesById.values()].filter((n) => n.epicId === epicId && n.kind === "task");
     const doneCount = tasks.filter((n) => n.frontmatter.status === "done").length;
+    const skippedCount = tasks.filter((n) => n.frontmatter.status === "skipped").length;
     const epic = graph.nodesById.get(epicId);
     const hasUnexpanded = epic?.frontmatter.expanded === false ||
         getChildren(graph, epicId).some((n) => n.kind === "feature" && n.frontmatter.expanded === false);
@@ -29,6 +30,8 @@ export function computeEpicDone(graph, epicId) {
         done: !hasUnexpanded && tasks.length > 0 && doneCount === tasks.length,
         total: tasks.length,
         doneCount,
+        skippedCount,
+        settled: !hasUnexpanded && tasks.length > 0 && doneCount + skippedCount === tasks.length,
     };
 }
 /**

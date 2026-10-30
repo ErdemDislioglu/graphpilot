@@ -38,7 +38,8 @@ export function expandCandidateInScope(graph, scope) {
 /** Kapsamdaki tüm epic'ler bitti mi (genişletilmemiş epic/feature "bitmedi" sayılır). */
 export function scopeDone(graph, scope) {
     const epics = [...graph.nodesById.values()].filter((n) => n.kind === "epic" && inScope(n, scope));
-    return epics.length > 0 && epics.every((e) => computeEpicDone(graph, e.id).done);
+    // `skipped` görevler de "iş kalmadı" sayılır — yoksa atlanan tek görev otopilotu sessizce sonsuza dek bekletir.
+    return epics.length > 0 && epics.every((e) => computeEpicDone(graph, e.id).settled);
 }
 /** `/run e03` argümanını doğrular: var olan, bitmemiş bir epic olmalı. */
 export function parseRunTarget(graph, arg, lang) {

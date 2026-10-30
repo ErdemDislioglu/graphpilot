@@ -5,6 +5,10 @@ export interface EpicDoneResult {
     done: boolean;
     total: number;
     doneCount: number;
+    skippedCount: number;
+    /** Otopilot için "bu epic'te yapılacak iş kalmadı": her task `done` ya da `skipped`
+     * (kullanıcı/otomatik karar). `done`'dan ayrı — repo-map/roll-up/bağımlılık `done`'a bakar. */
+    settled: boolean;
 }
 /**
  * Faz 7.2 — "Repo-map her epic sonunda yeniden üretilir". Orkestratör (`/gp:run`), bir

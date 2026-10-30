@@ -129,3 +129,10 @@ describe("decisionNeededMessage / formatImpactText — roadmap 13.9", () => {
     );
   });
 });
+
+describe("finishedMessage — atlanan görevler", () => {
+  it("atlanan görev varsa sayısı gösterilir", () => {
+    const m = finishedMessage("tr", { taskCount: 5, tokens: 0, escalations: 0, reportPath: "r.md", skippedCount: 2 });
+    expect(m.text).toContain("5 görev (2 atlandı)");
+  });
+});

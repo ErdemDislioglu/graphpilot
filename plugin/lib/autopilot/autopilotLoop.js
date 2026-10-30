@@ -47,7 +47,11 @@ function loadFresh(graphRootDir) {
 }
 function countTasks(graph) {
     const tasks = [...graph.nodesById.values()].filter((n) => n.kind === "task");
-    return { done: tasks.filter((n) => n.frontmatter.status === "done").length, total: tasks.length };
+    return {
+        done: tasks.filter((n) => n.frontmatter.status === "done").length,
+        skipped: tasks.filter((n) => n.frontmatter.status === "skipped").length,
+        total: tasks.length,
+    };
 }
 function lastErrorLine(node) {
     const match = node.body.match(/## Hata geçmişi\s*\n+([^\n]*)/);
@@ -344,6 +348,9 @@ export async function runAutopilotLoop(options) {
                     if (decision === "skip")
                         what = lang === "tr" ? "atlandı" : "skipped";
                     await notifier.send(lang === "tr" ? `⛔ ${target.id} durdu: ${outcome.reason}. Otomatik karar — ${what}.` : `⛔ ${target.id} stopped: ${outcome.reason}. Automatic decision — ${what}.`);
+                    // Epic'in son açık görevi atlandıysa epic burada biter (done yolu bu görevden geçmez).
+                    if (decision === "skip")
+                        await handleEpicCompletionIfAny(target.id, opts);
                 }
             }
             else if (outcome.kind === "blocked") {
@@ -410,8 +417,10 @@ export async function runAutopilotLoop(options) {
             idleWaitingNoticeSent = false;
             continue;
         }
-        const { done, total } = countTasks(graph);
-        const finished = scope === "all" ? total > 0 && done === total : scopeDone(graph, scope);
+        const { done, skipped, total } = countTasks(graph);
+        // `skipped` = karar verilmiş, yapılacak iş yok. Eskiden yalnız `done` sayılıyordu: tek bir
+        // atlanan görev otopilotu bildirim atmadan sonsuza dek "hazır görev yok" turunda tutuyordu.
+        const finished = scope === "all" ? total > 0 && done + skipped === total : scopeDone(graph, scope);
         if (finished && config.autopilot.idle_wait) {
             // Faz 12.13 — kapanmak yerine bir kez bildirip komut bekle.
             emitEvent(graphRootDir, { type: "finished" });
@@ -431,6 +440,7 @@ export async function runAutopilotLoop(options) {
                 tokens: 0,
                 escalations: 0,
                 reportPath: ".graph/_metrics/report.md",
+                skippedCount: skipped,
             }).text);
             return { processedCount, stopReason: "finished" };
         }
@@ -460,7 +470,7 @@ async function handleEpicCompletionIfAny(justFinishedNodeId, opts) {
     if (!node?.epicId)
         return;
     const epicDone = computeEpicDone(graph, node.epicId);
-    if (!epicDone.done)
+    if (!epicDone.settled)
         return;
     emitEvent(opts.graphRootDir, { type: "epic_done", epicId: node.epicId });
     const epicNode = graph.nodesById.get(node.epicId);

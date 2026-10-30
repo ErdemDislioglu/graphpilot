@@ -21,7 +21,7 @@ describe("computeEpicDone", () => {
       },
       (graph) => {
         const result = computeEpicDone(graph, "E01");
-        expect(result).toEqual({ epicId: "E01", done: true, total: 2, doneCount: 2 });
+        expect(result).toEqual({ epicId: "E01", done: true, total: 2, doneCount: 2, skippedCount: 0, settled: true });
       },
     );
   });
@@ -56,7 +56,7 @@ describe("computeEpicDone", () => {
       },
       (graph) => {
         const result = computeEpicDone(graph, "E01");
-        expect(result).toEqual({ epicId: "E01", done: true, total: 2, doneCount: 2 });
+        expect(result).toEqual({ epicId: "E01", done: true, total: 2, doneCount: 2, skippedCount: 0, settled: true });
       },
     );
   });
@@ -75,6 +75,8 @@ describe("computeEpicDone", () => {
           done: false,
           total: 1,
           doneCount: 1,
+          skippedCount: 0,
+          settled: false,
         });
       },
     );
@@ -141,6 +143,34 @@ describe("computeFeatureDone — 2026-10-25, gerçek bir test projesinde bulunan
       },
       (graph) => {
         expect(computeFeatureDone(graph, "E01-F01").done).toBe(false);
+      },
+    );
+  });
+});
+
+describe("computeEpicDone — settled (otopilot: skipped da 'iş kalmadı')", () => {
+  it("done + skipped: done:false (bağımlılık/roll-up için) ama settled:true", () => {
+    withTempGraph(
+      {
+        "e/epic.md": EPIC("E01"),
+        "e/t1.md": TASK("E01-F01-T01", "done"),
+        "e/t2.md": TASK("E01-F01-T02", "skipped"),
+      },
+      (graph) => {
+        expect(computeEpicDone(graph, "E01")).toMatchObject({ done: false, settled: true, skippedCount: 1 });
+      },
+    );
+  });
+
+  it("pending varken settled:false", () => {
+    withTempGraph(
+      {
+        "e/epic.md": EPIC("E01"),
+        "e/t1.md": TASK("E01-F01-T01", "skipped"),
+        "e/t2.md": TASK("E01-F01-T02", "pending"),
+      },
+      (graph) => {
+        expect(computeEpicDone(graph, "E01").settled).toBe(false);
       },
     );
   });

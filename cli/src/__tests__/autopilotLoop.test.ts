@@ -844,28 +844,23 @@ describe("runAutopilotLoop — risk'i high olmayan blocked görev sorulmaz (kull
   it("soru yoksa görev atlanır, hiç soru sorulmaz", async () => {
     await withTempGraphAsync({ "a.md": taskFrontmatter({}), "config.yml": CFG, "coder.md": CODER_MD }, async (_graph, dir) => {
       const notifier = new MockNotifier();
-      // `skipped` görev "bitti" sayılmadığı için döngü kendiliğinden bitmez — 3. turda /stop.
-      let polls = 0;
-      const fetchFn = vi.fn().mockImplementation(async () => {
-        polls += 1;
-        const result = polls === 3 ? [{ update_id: 1, message: { message_id: 1, chat: { id: 7 }, text: "/stop" } }] : [];
-        return { json: async () => ({ ok: true, result }) };
-      });
-      const poller = new TelegramPoller(new TelegramClient("TOKEN", fetchFn as unknown as typeof fetch), 7);
       const result = await runAutopilotLoop({
         graphRootDir: dir,
         agentsDir: dir,
         notifier,
-        poller,
+        poller: offlinePoller(),
         lang: "tr",
         spawner: () => ({ stdout: JSON.stringify({ result: "blocked: API anahtarı yok" }), stderr: "", status: 0 }),
         sleep: instantSleep,
         shortRetrySleep: noopShortRetrySleep,
       });
-      expect(result.stopReason).toBe("user_stop");
+      // Atlanan görev "iş kalmadı" sayılır: otopilot sessizce beklemez, bitirir.
+      expect(result.stopReason).toBe("finished");
       expect(notifier.asked).toHaveLength(0);
       expect(matter(readFileSync(join(dir, "a.md"), "utf-8")).data.status).toBe("skipped");
       expect(notifier.sent[0]).toBe("⛔ E01-F01-T01 durdu: API anahtarı yok. Otomatik karar — atlandı.");
+      expect(notifier.sent.some((m) => m.startsWith("✅ E01"))).toBe(true);
+      expect(notifier.sent.some((m) => m.startsWith("🏁") && m.includes("(1 atlandı)"))).toBe(true);
     });
   });
 });

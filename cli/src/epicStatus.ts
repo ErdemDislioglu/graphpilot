@@ -7,6 +7,10 @@ export interface EpicDoneResult {
   done: boolean;
   total: number;
   doneCount: number;
+  skippedCount: number;
+  /** Otopilot için "bu epic'te yapılacak iş kalmadı": her task `done` ya da `skipped`
+   * (kullanıcı/otomatik karar). `done`'dan ayrı — repo-map/roll-up/bağımlılık `done`'a bakar. */
+  settled: boolean;
 }
 
 /**
@@ -33,6 +37,7 @@ export function computeEpicDone(graph: Graph, epicId: string): EpicDoneResult {
     (n) => n.epicId === epicId && n.kind === "task",
   );
   const doneCount = tasks.filter((n) => n.frontmatter.status === "done").length;
+  const skippedCount = tasks.filter((n) => n.frontmatter.status === "skipped").length;
   const epic = graph.nodesById.get(epicId);
   const hasUnexpanded =
     epic?.frontmatter.expanded === false ||
@@ -44,6 +49,8 @@ export function computeEpicDone(graph: Graph, epicId: string): EpicDoneResult {
     done: !hasUnexpanded && tasks.length > 0 && doneCount === tasks.length,
     total: tasks.length,
     doneCount,
+    skippedCount,
+    settled: !hasUnexpanded && tasks.length > 0 && doneCount + skippedCount === tasks.length,
   };
 }
 

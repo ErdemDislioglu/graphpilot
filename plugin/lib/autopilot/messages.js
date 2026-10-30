@@ -95,9 +95,10 @@ export function resumeMessage(lang, opts) {
 }
 export function finishedMessage(lang, opts) {
     const tok = formatTokenCount(opts.tokens);
+    const skipped = opts.skippedCount ? (lang === "tr" ? ` (${opts.skippedCount} atlandı)` : ` (${opts.skippedCount} skipped)`) : "";
     const text = lang === "tr"
-        ? `🏁 Proje tamamlandı · ${opts.taskCount} görev · ~${tok} token · ${opts.escalations} yükseltme · rapor: ${opts.reportPath}`
-        : `🏁 Project complete · ${opts.taskCount} tasks · ~${tok} tokens · ${opts.escalations} escalations · report: ${opts.reportPath}`;
+        ? `🏁 Proje tamamlandı · ${opts.taskCount} görev${skipped} · ~${tok} token · ${opts.escalations} yükseltme · rapor: ${opts.reportPath}`
+        : `🏁 Project complete · ${opts.taskCount} tasks${skipped} · ~${tok} tokens · ${opts.escalations} escalations · report: ${opts.reportPath}`;
     return { text };
 }
 /**
