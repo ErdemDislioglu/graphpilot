@@ -1,3 +1,4 @@
+import { capTestModel } from "../route.js";
 const ESCALATING_TAGS = ["architecture", "security", "data_model", "integration"];
 function asStringArray(value) {
     return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
@@ -6,7 +7,8 @@ function seniorAssignment(config) {
     return { role: "senior", model: config.team.senior.model, agent: "senior" };
 }
 function testerAssignment(config, explicitModel) {
-    return { role: "tester", model: explicitModel ?? config.team.tester.model, agent: "tester" };
+    const model = capTestModel(explicitModel ?? config.team.tester.model, config);
+    return { role: "tester", model, agent: "tester" };
 }
 function docsAssignment(config) {
     return { role: "docs", model: config.team.docs.model, agent: "docs" };

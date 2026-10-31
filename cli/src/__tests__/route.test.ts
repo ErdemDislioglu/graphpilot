@@ -93,3 +93,43 @@ describe("resolveRoute — davranış kuralları", () => {
     expect(resolveRoute(node, config).budget).toBe(8000);
   });
 });
+
+describe("resolveRoute — Faz 14 O2 test görevi sınırı", () => {
+  const rules = [
+    { when: { complexity: "low" }, model: "haiku" },
+    { when: { complexity: "med" }, model: "sonnet" },
+    { when: { complexity: "high" }, model: "opus" },
+    { when: { risk: "high" }, model: "opus" },
+  ];
+  const base = {
+    routing: rules,
+    escalation: ["haiku", "sonnet", "opus"],
+    max_attempts_per_model: 1,
+    budgets: { default_context: 8000, max_turns: 25 },
+  };
+  const node = (fm: Record<string, unknown>) => ({
+    id: "E01-F01-T02",
+    kind: "task" as const,
+    name: "x",
+    filePath: "x",
+    relPath: "x",
+    body: "",
+    epicId: "E01",
+    frontmatter: { model: "auto", agent: "auto", ...fm },
+  });
+
+  it("risk: high + complexity: high test görevi opus değil tester/sonnet'e gider", () => {
+    const r = resolveRoute(node({ type: "test", complexity: "high", risk: "high" }), ConfigSchema.parse(base));
+    expect(r).toMatchObject({ agent: "tester", model: "sonnet" });
+  });
+
+  it("aynı risk/complexity'de feature görevi opus'ta kalır", () => {
+    const r = resolveRoute(node({ type: "feature", complexity: "high", risk: "high" }), ConfigSchema.parse(base));
+    expect(r).toMatchObject({ agent: "coder", model: "opus" });
+  });
+
+  it("efficiency.test_max_model ile sınır değiştirilebilir", () => {
+    const config = ConfigSchema.parse({ ...base, efficiency: { test_max_model: "haiku" } });
+    expect(resolveRoute(node({ type: "test", complexity: "med" }), config).model).toBe("haiku");
+  });
+});

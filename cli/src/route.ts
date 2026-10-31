@@ -40,11 +40,26 @@ export function resolveRoute(node: GraphNode, config: Config): RouteResult {
 
   const explicitAgent = typeof fm.agent === "string" && fm.agent !== "auto" ? fm.agent : null;
   const agent = explicitAgent ?? defaultAgentForType(fm.type);
+  if (fm.type === "test") model = capTestModel(model, config);
 
   const budget =
     typeof fm.context_budget === "number" ? fm.context_budget : config.budgets.default_context;
 
   return { model, agent, review, budget, max_turns: config.budgets.max_turns };
+}
+
+/**
+ * Faz 14 O2 — `type: test` görevi `efficiency.test_max_model`'in üstüne çıkmaz (ör.
+ * `risk: high → opus` kuralı onu yakalasa bile). Sıra `config.escalation`'dan okunur;
+ * modellerden biri listede yoksa sıralama belirsizdir, model olduğu gibi kalır.
+ */
+export function capTestModel(model: string, config: Config): string {
+  const order = config.escalation as string[];
+  const cap = config.efficiency.test_max_model;
+  const idx = order.indexOf(model);
+  const capIdx = order.indexOf(cap);
+  if (idx === -1 || capIdx === -1) return model;
+  return idx > capIdx ? cap : model;
 }
 
 type RoutingCondition = Config["routing"][number]["when"];

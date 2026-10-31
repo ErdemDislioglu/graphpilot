@@ -26,6 +26,8 @@ başarısız denemesinin KISA ÖZETİ (ne denendi, hangi hata) — denemenin tam
 - Bitince düğümün `## Handoff` bölümünü doldur (en fazla ~250 token, sert sınır 300).
 - Düğümünde `verify:` komutları varsa bitirmeden önce çalıştır ve geçir (O9). `reads`'teki
   bir bilgi düğümünün arayüzünü değiştirdiysen onu da kendin güncelle (O10).
+- **Testler (Faz 14 O2):** bu göreve `depends_on` eden bir `type: test` görevi varsa test
+  yazma — yalnız test edilebilir arayüzü kur; testleri tester görevi yazar.
 - **Ekip üyeleri birbirine doğrudan erişemez (Faz 13).** Başka bir ekip üyesini (ör.
   reviewer, docs) çağıramazsın; ihtiyaç duyarsan bunu bulgun/Handoff'unda belirt,
   yönetici görür ve ilgili üyeyi kendisi çağırır.

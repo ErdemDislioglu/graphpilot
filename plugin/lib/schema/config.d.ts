@@ -150,6 +150,12 @@ declare const EfficiencySchema: z.ZodObject<{
         med: "med";
         high: "high";
     }>>;
+    test_max_model: z.ZodDefault<z.ZodEnum<{
+        haiku: "haiku";
+        sonnet: "sonnet";
+        opus: "opus";
+        fable: "fable";
+    }>>;
     expansion_model: z.ZodDefault<z.ZodEnum<{
         haiku: "haiku";
         sonnet: "sonnet";
@@ -173,6 +179,7 @@ export declare const DEFAULT_EFFICIENCY: {
     small_epic_max_tasks: number;
     merge_interface_task: boolean;
     separate_test_min_risk: "low" | "med" | "high";
+    test_max_model: "haiku" | "sonnet" | "opus" | "fable";
     expansion_model: "haiku" | "sonnet" | "opus" | "fable";
     feature_agent: boolean;
     feature_agent_max_tasks: number;
@@ -342,6 +349,12 @@ export declare const ConfigSchema: z.ZodObject<{
             low: "low";
             med: "med";
             high: "high";
+        }>>;
+        test_max_model: z.ZodDefault<z.ZodEnum<{
+            haiku: "haiku";
+            sonnet: "sonnet";
+            opus: "opus";
+            fable: "fable";
         }>>;
         expansion_model: z.ZodDefault<z.ZodEnum<{
             haiku: "haiku";

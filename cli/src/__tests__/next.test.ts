@@ -47,9 +47,9 @@ describe("computeNext — gerçek bookstore graph (T01 done, diğerleri pending)
     expect(blocked?.waitingOn.map((n) => n.id)).toEqual(["E01-F02-T01"]);
   });
 
-  it("döngü yok, topoOrder tüm 5 task'ı içeriyor", () => {
+  it("döngü yok, topoOrder tüm 6 task'ı içeriyor", () => {
     expect(result.cycles).toEqual([]);
-    expect(result.topoOrder.length).toBe(5);
+    expect(result.topoOrder.length).toBe(6);
   });
 
   it("T02 (src/catalog/**) ve F02-T01 (src/cart/types.ts) touches çakışmıyor → tek grupta", () => {

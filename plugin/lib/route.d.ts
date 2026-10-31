@@ -16,3 +16,9 @@ export interface RouteResult {
  * çalışır" ilkesi: yapılandırma boşluğu gürültülü başarısız olmalı).
  */
 export declare function resolveRoute(node: GraphNode, config: Config): RouteResult;
+/**
+ * Faz 14 O2 — `type: test` görevi `efficiency.test_max_model`'in üstüne çıkmaz (ör.
+ * `risk: high → opus` kuralı onu yakalasa bile). Sıra `config.escalation`'dan okunur;
+ * modellerden biri listede yoksa sıralama belirsizdir, model olduğu gibi kalır.
+ */
+export declare function capTestModel(model: string, config: Config): string;

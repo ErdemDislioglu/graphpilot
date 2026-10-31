@@ -38,8 +38,8 @@ describe("örnek bookstore graph — Zod doğrulaması", () => {
     (f) => !f.endsWith("brief.md"), // SPEC §7: brief.md frontmatter'sız, sabit yoldan tanınır
   );
 
-  it("tam 11 düğüm dosyası bulundu (1 epic + 2 feature + 5 task + 3 knowledge)", () => {
-    expect(files.length).toBe(11);
+  it("tam 12 düğüm dosyası bulundu (1 epic + 2 feature + 6 task + 3 knowledge)", () => {
+    expect(files.length).toBe(12);
   });
 
   for (const file of files) {

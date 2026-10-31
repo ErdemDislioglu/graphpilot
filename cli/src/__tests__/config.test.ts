@@ -217,6 +217,7 @@ describe("ConfigSchema — Faz 14 efficiency (ölçek koruması)", () => {
       small_epic_max_tasks: 8,
       merge_interface_task: true,
       separate_test_min_risk: "med",
+      test_max_model: "sonnet",
       expansion_model: "sonnet",
       feature_agent: true,
       feature_agent_max_tasks: 4,

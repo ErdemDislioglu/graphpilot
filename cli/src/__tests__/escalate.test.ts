@@ -91,3 +91,13 @@ describe("escalateNode", () => {
     });
   });
 });
+
+describe("escalateNode — Faz 14 O2 test_max_model", () => {
+  it("type: test görevi test_max_model'de (sonnet) durur, opus'a yükseltilmez", () => {
+    withTempGraph({ "a.md": frontmatter(TASK({ type: "test", model: "sonnet" })) }, (graph) => {
+      const result = escalateNode(graph, "E01-F01-T01", CONFIG);
+      expect(result.escalated).toBe(false);
+      expect(result.reason).toMatch(/test_max_model/);
+    });
+  });
+});

@@ -16,8 +16,8 @@ describe("parseGraph — örnek bookstore graph", () => {
     expect(graph.parseErrors).toEqual([]);
   });
 
-  it("11 düğüm buldu (1 epic + 2 feature + 5 task + 3 knowledge)", () => {
-    expect(graph.nodesById.size).toBe(11);
+  it("12 düğüm buldu (1 epic + 2 feature + 6 task + 3 knowledge)", () => {
+    expect(graph.nodesById.size).toBe(12);
   });
 
   it("brief.md ayrı okundu, bir graph düğümü olarak sayılmadı", () => {

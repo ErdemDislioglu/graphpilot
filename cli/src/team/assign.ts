@@ -1,4 +1,5 @@
 import type { GraphNode } from "../graph/types.js";
+import { capTestModel } from "../route.js";
 import type { Config } from "../schema/index.js";
 
 export type TeamRole = "junior" | "senior" | "tester" | "docs";
@@ -20,7 +21,8 @@ function seniorAssignment(config: Config): Assignment {
 }
 
 function testerAssignment(config: Config, explicitModel: string | null): Assignment {
-  return { role: "tester", model: explicitModel ?? config.team.tester.model, agent: "tester" };
+  const model = capTestModel(explicitModel ?? config.team.tester.model, config);
+  return { role: "tester", model, agent: "tester" };
 }
 
 function docsAssignment(config: Config): Assignment {

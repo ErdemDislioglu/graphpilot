@@ -240,6 +240,11 @@ const EfficiencySchema = z
     merge_interface_task: z.boolean().default(true),
     /** O2 — ayrı `type: test` görevi için en düşük risk. `low` = her zaman ayrı (eski davranış). */
     separate_test_min_risk: RiskSchema.default("med"),
+    /**
+     * Faz 14 O2 — `type: test` görevinin çıkabileceği en üst model (routing ve escalation).
+     * `risk: high → opus` kuralı test görevlerini pahalı modele çekmesin. Sıra `escalation`'dan.
+     */
+    test_max_model: ModelSchema.exclude(["auto"]).default("sonnet"),
     /** O14 adım 1 — GENİŞLETME-* planner çağrılarının modeli. `opus` = eski davranış. */
     expansion_model: ModelSchema.exclude(["auto"]).default("sonnet"),
     /** O16 — aynı `touches` zincirindeki sıralı low/med görevler tek agent'a verilir. */

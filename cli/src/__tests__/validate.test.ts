@@ -344,3 +344,53 @@ describe("validateGraph — Faz 14 O18: doküman bütçesi", () => {
     });
   });
 });
+
+describe("validateGraph — Faz 14 O2 ayrı test görevi", () => {
+  const RISKY = { ...TASK_OK, id: "E01-T01", risk: "high", touches: ["src/clock.ts"] };
+  const TEST_TASK = { ...TASK_OK, id: "E01-T02", name: "T02-x", type: "test", depends_on: ["E01-T01"] };
+  const body = (criteria: string) => `## Görev\nx\n\n## Kabul kriterleri\n${criteria}\n`;
+  const o2 = (graph: Parameters<typeof validateGraph>[0]) =>
+    validateGraph(graph).filter((i) => i.message.includes("(O2)"));
+
+  it("test görevi var, kabul kriteri 'test edilebilir arayüz' → sorun yok", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(RISKY) + body("- Clock enjekte edilebilir (test edilebilir arayüz)"),
+        "b.md": frontmatter(TEST_TASK) + body("- senaryolar kapsanır"),
+      },
+      (graph) => expect(o2(graph)).toEqual([]),
+    );
+  });
+
+  it("touches'ta test dosyası / kabul kriterinde test isteği → warning", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter({ ...RISKY, touches: ["src/clock.ts", "src/__tests__/clock.test.ts"] }) + body("- x"),
+        "b.md": frontmatter(TEST_TASK) + body("- y"),
+        "c.md": frontmatter({ ...RISKY, id: "E01-T03", name: "T03-x" }) + body("- Unit test sahte saatle"),
+        "d.md": frontmatter({ ...TEST_TASK, id: "E01-T04", name: "T04-x", depends_on: ["E01-T03"] }) + body("- z"),
+      },
+      (graph) => {
+        const issues = o2(graph);
+        expect(issues.map((i) => [i.nodeId, i.severity])).toEqual([
+          ["E01-T01", "warning"],
+          ["E01-T03", "warning"],
+        ]);
+      },
+    );
+  });
+
+  it("ona depends_on eden type: test görevi yoksa → error; risk eşiğin altındaysa ya da görev başlamışsa yok", () => {
+    withTempGraph(
+      {
+        "a.md": frontmatter(RISKY) + body("- x"),
+        "b.md": frontmatter({ ...RISKY, id: "E01-T02", name: "T02-x", risk: "low" }) + body("- x"),
+        "c.md": frontmatter({ ...RISKY, id: "E01-T03", name: "T03-x", status: "done" }) + body("- x"),
+      },
+      (graph) => {
+        const issues = o2(graph);
+        expect(issues.map((i) => [i.nodeId, i.severity])).toEqual([["E01-T01", "error"]]);
+      },
+    );
+  });
+});

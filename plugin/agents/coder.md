@@ -34,7 +34,9 @@ görevleri sırayla yap; her biri için kendi düğüm dosyasındaki Handoff'u a
   bunu Handoff'ta/bulgunda net belirt; yönetici görüp senior'ı kendisi çağırır.
 - Testleri `npm test` gibi proje komutlarıyla çalıştır (brief'teki "Test stratejisi").
 - **Testler (Faz 14 O2):** Görevin `touches`'ında test dosyası varsa ya da kabul
-  kriterleri test istiyorsa testleri de SEN yaz — ayrı bir test görevi yok demektir.
+  kriterleri test istiyorsa testleri de SEN yaz. İstisna: graph'ta bu göreve `depends_on`
+  eden bir `type: test` görevi varsa testleri o yazar — sen yalnız test edilebilir arayüzü
+  kur, test yazma.
 - **Doğrulama (O9):** Düğümünde `verify:` komutları varsa bitirmeden önce çalıştır ve geçir.
 - **Bilgi düğümü (O10):** `reads`'teki bir bilgi düğümünün arayüzünü değiştirdiysen
   `## Arayüz`/`## Kararlar`'ını kendin güncelle (kod kopyalama, yalnız imza/sözleşme) ve

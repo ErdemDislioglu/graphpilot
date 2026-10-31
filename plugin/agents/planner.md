@@ -81,8 +81,13 @@ bu feature için açılmış bilgi düğümlerinin adlarını `.graph/`'tan kend
    `efficiency.merge_interface_task` açıksa **birleştir**: arayüzü bilgi düğümüne yazmak o
    görevin kabul kriteri olur.
 2. **Test (O2):** görevin `risk`'i ≥ `efficiency.separate_test_min_risk` ise (ya da kullanıcı
-   açıkça istediyse) test ayrı bir görevdir (`type: test`, uygulamaya `depends_on`).
-   Değilse testleri uygulama görevi yazar: test dosyası `touches`'a, test kabul kriterine.
+   açıkça istediyse) test ayrı bir görevdir (`type: test`, uygulamaya `depends_on`). Bu
+   durumda uygulama görevinin `touches`'ına test dosyası, kabul kriterine test **koyma** —
+   kabul kriteri "test edilebilir arayüz" olur (ör. "Clock enjekte edilebilir"), `verify`'ı
+   build/typecheck; testlerin kendisi tester görevinin kabul kriterine yazılır. `gp validate`
+   bunu denetler: test içeren riskli görev → warning, ona `depends_on` eden test görevi yok
+   → error. Risk eşiğin altındaysa testleri uygulama görevi yazar: test dosyası `touches`'a,
+   test kabul kriterine.
 3. **Test kapsamı (B13):** testler sonraki feature'ların değiştireceği global durumu
    sabitlemesin ("rota listesi boş", "tam olarak N kayıt" gibi); davranışı test etsin.
 4. Her görev tek oturumda, tek agent'la, `context_budget` içinde bitebilir olmalı.

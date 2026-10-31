@@ -21,8 +21,8 @@ describe("generateRootIndex — gerçek bookstore graph", () => {
     expect(output).toContain("Küçük bir kitap satış sitesi");
   });
 
-  it("E01 satırını doğru ilerleme yüzdesiyle içerir (1/5 done = %20)", () => {
-    expect(output).toMatch(/\| E01 \| epic \| Katalog ve ürün arama \| running \| 20% \|/);
+  it("E01 satırını doğru ilerleme yüzdesiyle içerir (1/6 done = %17)", () => {
+    expect(output).toMatch(/\| E01 \| epic \| Katalog ve ürün arama \| running \| 17% \|/);
   });
 
   it("deterministik: aynı graph'ı iki kez parse edip üretmek byte-byte aynı sonucu verir", () => {
@@ -35,11 +35,11 @@ describe("generateEpicIndex — gerçek bookstore graph", () => {
   const graph = parseGraph(bookstoreGraph);
   const output = generateEpicIndex(graph, "E01");
 
-  it("iki feature + beş task + iki epic-scope knowledge satırı içerir (9 satır)", () => {
+  it("iki feature + altı task + iki epic-scope knowledge satırı içerir (10 satır)", () => {
     const rows = output
       .split("\n")
       .filter((l) => l.startsWith("| E01") || l.startsWith("| cart") || l.startsWith("| catalog"));
-    expect(rows.length).toBe(9);
+    expect(rows.length).toBe(10);
   });
 
   it("task satırlarında model sütunu gp route'tan geliyor (T01 → haiku)", () => {

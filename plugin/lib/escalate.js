@@ -1,6 +1,6 @@
 import { setFrontmatter } from "./set.js";
 import { appendErrorHistoryLine } from "./errorHistory.js";
-import { resolveRoute } from "./route.js";
+import { capTestModel, resolveRoute } from "./route.js";
 /**
  * SPEC/roadmap 6.5 — hata politikasının 2. adımı. Mevcut çözülen modeli bulur,
  * `config.escalation` listesinde bir sonrakine geçer, `model` alanını AÇIKÇA o değere
@@ -31,6 +31,15 @@ export function escalateNode(graph, nodeId, config) {
         };
     }
     const nextModel = config.escalation[idx + 1];
+    // Faz 14 O2 — test görevi `test_max_model`'de durur; aksi halde resolveRoute modeli geri
+    // indirir ve her escalate aynı basamağı tekrar yazardı.
+    if (nextModel && node.frontmatter.type === "test" && capTestModel(nextModel, config) !== nextModel) {
+        return {
+            escalated: false,
+            fromModel: currentModel,
+            reason: `test görevi efficiency.test_max_model (${config.efficiency.test_max_model}) sınırında`,
+        };
+    }
     if (!nextModel) {
         return {
             escalated: false,

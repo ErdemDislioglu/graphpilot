@@ -81,3 +81,10 @@ describe("resolveAssignment — roadmap 13.3 tablosu", () => {
     expect(result.role).toBe("junior");
   });
 });
+
+describe("resolveAssignment — Faz 14 O2 test_max_model", () => {
+  it("risk: high test görevi tester'a gider; elle opus verilse bile sonnet'e iner", () => {
+    const result = resolveAssignment(node({ type: "test", risk: "high", complexity: "high", model: "opus" }), CONFIG);
+    expect(result).toEqual({ role: "tester", model: "sonnet", agent: "tester" });
+  });
+});

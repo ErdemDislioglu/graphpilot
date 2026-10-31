@@ -4,6 +4,7 @@ import {
   TaskFrontmatterSchema,
   KnowledgeFrontmatterSchema,
   ConfigSchema,
+  DEFAULT_EFFICIENCY,
 } from "./schema/index.js";
 import { extractSection } from "./markdown.js";
 import { estimateTokens } from "./tokens.js";
@@ -26,6 +27,16 @@ const KNOWLEDGE_TOKEN_LIMIT = 1200;
 const MAX_TASKS_PER_FEATURE = 12;
 /** SPEC/roadmap 5.5 — çok küçük görev heuristiği: Faz 7.5 gerçek birleştirmeyi tasarlayacak. */
 const SMALL_TASK_MAX_TOUCHES = 1;
+const RISK_ORDER = ["low", "med", "high"];
+/** Faz 14 O2 — test dosyası desenleri: `src/test/`, `__tests__/`, `*Test.*`, `*.test.*`. */
+const TEST_FILE_RE = /(^|\/)(src\/test|__tests__)\/|Test\.[^/]+$|\.test\.[^/]+$/;
+/** "test edilebilir arayüz" O2'nin istediği kabul kriteridir — test isteği sayılmaz. */
+const TESTABLE_RE = /test\s*edilebilir|testlenebilir|testable/gi;
+const TEST_REQUEST_RE = /\btest/i;
+/** Ayrı test görevi gerektiren uygulama tipleri (docs/config/scaffold/test hariç). */
+const SEPARATE_TEST_TYPES = ["feature", "refactor", "fix"];
+/** Yalnız henüz başlamamış görevler — açılmış eski graph'lar error'a düşmesin. */
+const NOT_STARTED = ["pending", "ready"];
 
 /**
  * SPEC'teki tüm kuralları kontrol eder (§3-§10). Sırasıyla:
@@ -266,6 +277,57 @@ export function validateGraph(graph: Graph): ValidationIssue[] {
     }
   }
 
+  issues.push(...checkSeparateTests(graph, validConfig?.efficiency ?? DEFAULT_EFFICIENCY));
+
+  return issues;
+}
+
+/**
+ * Faz 14 O2 — risk ≥ `separate_test_min_risk` olan uygulama görevinin testleri ayrı
+ * `type: test` görevine yazılır (pahalı model test yazmasın). Görev testi kendisi
+ * üstleniyorsa (touches'ta test dosyası / kabul kriterinde test isteği) → warning;
+ * ona `depends_on` eden bir test görevi yoksa → error (planner'a geri döner).
+ */
+function checkSeparateTests(graph: Graph, efficiency: typeof DEFAULT_EFFICIENCY): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const minRisk = RISK_ORDER.indexOf(efficiency.separate_test_min_risk);
+  const tasks = tasksOf(graph);
+  for (const task of tasks) {
+    const fm = task.frontmatter;
+    if (fm.type === "test" || RISK_ORDER.indexOf(String(fm.risk)) < minRisk) continue;
+    if (!NOT_STARTED.includes(String(fm.status))) continue;
+
+    const touches = Array.isArray(fm.touches) ? fm.touches.filter((t): t is string => typeof t === "string") : [];
+    const testFiles = touches.filter((t) => TEST_FILE_RE.test(t));
+    const criteria = (extractSection(task.body, "Kabul kriterleri") ?? "")
+      .split("\n")
+      .filter((line) => TEST_REQUEST_RE.test(line.replace(TESTABLE_RE, "")));
+    if (testFiles.length > 0 || criteria.length > 0) {
+      const why = testFiles.length > 0 ? `touches'ta test dosyası (${testFiles.join(", ")})` : "kabul kriteri test istiyor";
+      issues.push({
+        file: task.filePath,
+        nodeId: task.id,
+        severity: "warning",
+        message: `risk ${String(fm.risk)} ≥ separate_test_min_risk ama ${why} — kabul kriteri "test edilebilir arayüz" olsun, testler ayrı type: test görevine (O2)`,
+      });
+    }
+
+    if (!SEPARATE_TEST_TYPES.includes(String(fm.type))) continue;
+    const hasTestTask = tasks.some(
+      (t) =>
+        t.frontmatter.type === "test" &&
+        Array.isArray(t.frontmatter.depends_on) &&
+        t.frontmatter.depends_on.includes(task.id),
+    );
+    if (!hasTestTask) {
+      issues.push({
+        file: task.filePath,
+        nodeId: task.id,
+        severity: "error",
+        message: `risk ${String(fm.risk)} ≥ separate_test_min_risk ama bu göreve depends_on eden type: test görevi yok (O2)`,
+      });
+    }
+  }
   return issues;
 }
 
