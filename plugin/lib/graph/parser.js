@@ -4,6 +4,7 @@ import matter from "gray-matter";
 import { parse as parseYaml } from "yaml";
 import { NodeKindSchema } from "../schema/common.js";
 import { extractWikilinks } from "./links.js";
+import { FIELD_NOTES_FILE } from "../fieldNotes.js";
 /**
  * SPEC §1 — `.graph/` altındaki tüm md'leri okur, frontmatter + body ayırır,
  * `Graph` nesnesini (düğümler + kenarlar) kurar.
@@ -36,7 +37,9 @@ export function parseGraph(graphRootDir) {
             });
         }
     }
-    const mdFiles = listMarkdownFiles(graphRootDir).filter((f) => f !== briefPath && !isGeneratedIndex(f));
+    // Saha notları (`gp note`) düğüm değildir — brief gibi kökte, frontmatter'sız.
+    const fieldNotesPath = join(graphRootDir, FIELD_NOTES_FILE);
+    const mdFiles = listMarkdownFiles(graphRootDir).filter((f) => f !== briefPath && f !== fieldNotesPath && !isGeneratedIndex(f));
     for (const filePath of mdFiles) {
         const raw = readFileSync(filePath, "utf-8");
         let data;

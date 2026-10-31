@@ -307,6 +307,18 @@ const WorkflowSchema = z
   })
   .strict();
 
+/**
+ * Saha notları (`gp note`, `.graph/saha-notlari.md`) — plugin'in kendisiyle ilgili bug ve
+ * iyileştirmeler. Sınırlar dosyanın şişmesini önler; `enabled: false` notu sessizce atlar.
+ */
+const FieldNotesSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    max_entries: z.number().int().positive().default(12),
+    max_note_tokens: z.number().int().positive().default(150),
+  })
+  .strict();
+
 export const DEFAULT_EFFICIENCY = EfficiencySchema.parse({});
 
 export const DEFAULT_OPTIMIZATIONS = {
@@ -360,6 +372,7 @@ export const ConfigSchema = z
     }),
     efficiency: EfficiencySchema.default(DEFAULT_EFFICIENCY),
     workflow: WorkflowSchema.default({ branch_per_epic: false, push_on_epic_done: false, notify_epic_done: false }),
+    field_notes: FieldNotesSchema.default({ enabled: true, max_entries: 12, max_note_tokens: 150 }),
     team: TeamSchema.default({
       enabled: true,
       manager: { model: "sonnet", consult_senior_for: ["architecture", "data_model", "security"], autonomy: "balanced" },

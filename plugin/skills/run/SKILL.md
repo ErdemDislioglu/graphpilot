@@ -101,3 +101,20 @@ hedef ID + `efficiency` değerleri + "girdileri (brief, hedef düğüm, ilgili b
 
 ## Bitirme
 `gp status` → kısa özet: done/failed sayısı, `unverified` görevler, bildirilen bulgular.
+
+### Saha notları (zorunlu adım — her bitirmede)
+Bu koşuda **plugin'in kendisiyle** (gp, agent kuralları, skill akışı — projenin kodu değil)
+ilgili bir sorun gördüysen `.graph/saha-notlari.md`'ye yaz. Önce `gp note list` — aynı
+sorun varsa yeni madde açma, **aynı başlıkla** `gp note add … --seen <id>` (yalnız kanıt eklenir).
+Yeni not ancak **hepsi** doğruysa: (1) somut kanıt var (görev ID, komut çıktısı); (2) etkisi
+var — yanlış sonuç (ör. doğrulanmamış done), elle müdahale, belirgin token/maliyet kaybı ya
+da takılma; (3) somut bir öneri yazabiliyorsun. **Yazma:** tek seferlik agent hatası ve
+yeniden denemeyle düzelen iş, projeye özgü kod/ortam sorunu, zevk tercihleri, zaten
+düzeltilmiş olan. Çoğu koşuda not çıkmaz — bu normal; özete "saha notu: yok" yaz.
+```
+gp note add --level yuksek|orta|dusuk --title "<kısa başlık>" --seen <id,id> \
+  --body "<dosya:satır> ne oldu. Etki: … Öneri: …"   # en fazla ~150 token
+```
+`max_entries` doluysa önemsiz bir notu `gp note remove <no>` ile çıkar ya da yazma.
+Çözüldüğünü bildiğin notu da `gp note remove` ile çıkar. Yazdığın notu bitirme özetinde
+tek satırla göster.

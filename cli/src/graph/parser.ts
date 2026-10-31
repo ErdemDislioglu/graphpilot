@@ -4,6 +4,7 @@ import matter from "gray-matter";
 import { parse as parseYaml } from "yaml";
 import { NodeKindSchema } from "../schema/common.js";
 import { extractWikilinks } from "./links.js";
+import { FIELD_NOTES_FILE } from "../fieldNotes.js";
 import type { Edge, Graph, GraphNode, ParseError } from "./types.js";
 
 /**
@@ -41,8 +42,10 @@ export function parseGraph(graphRootDir: string): Graph {
     }
   }
 
+  // Saha notları (`gp note`) düğüm değildir — brief gibi kökte, frontmatter'sız.
+  const fieldNotesPath = join(graphRootDir, FIELD_NOTES_FILE);
   const mdFiles = listMarkdownFiles(graphRootDir).filter(
-    (f) => f !== briefPath && !isGeneratedIndex(f),
+    (f) => f !== briefPath && f !== fieldNotesPath && !isGeneratedIndex(f),
   );
 
   for (const filePath of mdFiles) {

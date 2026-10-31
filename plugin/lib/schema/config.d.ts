@@ -379,6 +379,11 @@ export declare const ConfigSchema: z.ZodObject<{
         push_on_epic_done: z.ZodDefault<z.ZodBoolean>;
         notify_epic_done: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strict>>;
+    field_notes: z.ZodDefault<z.ZodObject<{
+        enabled: z.ZodDefault<z.ZodBoolean>;
+        max_entries: z.ZodDefault<z.ZodNumber>;
+        max_note_tokens: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strict>>;
     team: z.ZodDefault<z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
         manager: z.ZodDefault<z.ZodObject<{

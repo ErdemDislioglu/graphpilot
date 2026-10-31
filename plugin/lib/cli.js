@@ -41,6 +41,7 @@ import { computeAllKnowledgeSyncReports, defaultFileHashReader, setKnowledgeSour
 import { readAgentDefinition } from "./agentFile.js";
 import { runNodeHeadlessWithRetry } from "./runModeB.js";
 import { writeFileAtomic } from "./atomicWrite.js";
+import { NOTE_LEVELS, addFieldNote, fieldNotesPath, readFieldNotes, removeFieldNote } from "./fieldNotes.js";
 import { existsSync, mkdirSync, readFileSync, openSync } from "node:fs";
 import { ConfigSchema } from "./schema/index.js";
 import { basename, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
@@ -696,6 +697,37 @@ export function buildCli() {
         ]
             .filter(Boolean)
             .join("\n"));
+    }));
+    // Saha notları — plugin'in kendisiyle ilgili bug/iyileştirme (yönetici /gp:run bitirmesinde).
+    const noteCmd = program.command("note").description("Saha notları (.graph/saha-notlari.md): plugin bug/iyileştirme");
+    withGraphRoot(noteCmd.command("list").description("mevcut notlar (numara, seviye, başlık, görüldü)")).action(action((opts) => {
+        const { notes } = readFieldNotes(opts.graphRoot);
+        const rows = notes.map((n, i) => ({ number: i + 1, level: n.level, title: n.title, seen: n.seen }));
+        output(opts, { notes: rows, path: fieldNotesPath(opts.graphRoot) }, () => rows.length
+            ? rows.map((r) => `${r.number}. [${r.level}] ${r.title}${r.seen.length ? ` (${r.seen.join(", ")})` : ""}`).join("\n")
+            : "· not yok");
+    }));
+    withGraphRoot(noteCmd
+        .command("add")
+        .description("yeni not; aynı başlık varsa yalnız --seen kanıtı eklenir")
+        .requiredOption("--level <level>", `seviye (${NOTE_LEVELS.join(", ")})`)
+        .requiredOption("--title <title>", "kısa başlık")
+        .option("--body <body>", "sorun, etki, öneri (kısa)", "")
+        .option("--seen <ids>", "kanıt: görev ID'leri, virgülle", "")).action(action((opts) => {
+        if (!NOTE_LEVELS.includes(opts.level)) {
+            throw new Error(`geçersiz seviye: ${opts.level} (${NOTE_LEVELS.join(", ")})`);
+        }
+        const config = loadConfig(loadGraph(opts));
+        const result = addFieldNote(opts.graphRoot, { level: opts.level, title: opts.title, body: opts.body, seen: opts.seen.split(",") }, config);
+        output(opts, result, () => result.status === "disabled"
+            ? "· field_notes.enabled: false — not yazılmadı"
+            : result.status === "merged"
+                ? `↺ ${result.number}. nota eklendi (görüldü: ${result.seen.join(", ")})`
+                : `✓ ${result.number}. not eklendi (toplam ${result.total})`);
+    }));
+    withGraphRoot(noteCmd.command("remove").description("çözülen notu çıkar").argument("<number>", "gp note list numarası")).action(action((number, opts) => {
+        const result = removeFieldNote(opts.graphRoot, Number(number));
+        output(opts, result, () => `✓ çıkarıldı: ${result.removed} (kalan ${result.total})`);
     }));
     withGraphRoot(program
         .command("verify")

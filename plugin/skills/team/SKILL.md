@@ -103,7 +103,7 @@ Bu kararı işaretler VE aynı feature'a bir düzeltme görevi açar — `gp nex
 sonraki turunda bu görev normal akışa (2. adım) girer.
 
 ## Bitirme
-`/gp:run`'ın "Bitirme"siyle AYNI. Ek olarak: `gp team stats --json` ile ekip
+`/gp:run`'ın "Bitirme"siyle AYNI (saha notları adımı dahil). Ek olarak: `gp team stats --json` ile ekip
 ölçümlerini (yanlış tag oranı, karar/geri çevirme sayısı) kullanıcıya özetle.
 
 ## Otopilot (Mod B, Faz 12) ile ilişki
