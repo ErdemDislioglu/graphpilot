@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadSecrets, readSecretsFile, writeSecretsFile } from "../autopilot/secrets.js";
+import { loadProjectSecrets, loadSecrets, projectKey, readSecretsFile, writeSecretsFile } from "../autopilot/secrets.js";
 
 let dir: string;
 
@@ -57,5 +57,43 @@ describe("secrets.ts — roadmap 12.2/12.9", () => {
   it("loadSecrets — hiçbiri yoksa null döner", () => {
     dir = mkdtempSync(join(tmpdir(), "gp-secrets-test-"));
     expect(loadSecrets(dir, {} as NodeJS.ProcessEnv)).toBeNull();
+  });
+});
+
+describe("projeye özel Telegram botu (2026-10-31)", () => {
+  it("projeKey: .graph'ın üst dizininin mutlak yolu", () => {
+    expect(projectKey("/x/versoApp/.graph")).toBe("/x/versoApp");
+  });
+
+  it("her proje kendi botunu alır; global ve diğer projeler korunur", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gp-secrets-"));
+    writeSecretsFile({ telegramBotToken: "GLOBAL", telegramChatId: "1" }, dir);
+    writeSecretsFile({ telegramBotToken: "GP", telegramChatId: "2" }, dir, "/x/gp/.graph");
+    writeSecretsFile({ telegramBotToken: "VERSO", telegramChatId: "3" }, dir, "/x/versoApp/.graph");
+
+    expect(loadProjectSecrets("/x/gp/.graph", dir, {})).toEqual({ telegramBotToken: "GP", telegramChatId: "2" });
+    expect(loadProjectSecrets("/x/versoApp/.graph", dir, {})).toEqual({ telegramBotToken: "VERSO", telegramChatId: "3" });
+    expect(readSecretsFile(dir)).toEqual({ telegramBotToken: "GLOBAL", telegramChatId: "1" });
+  });
+
+  it("kendi botu olmayan proje: ortam değişkeni, o da yoksa global", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gp-secrets-"));
+    writeSecretsFile({ telegramBotToken: "GLOBAL", telegramChatId: "1" }, dir);
+    expect(loadProjectSecrets("/x/yeni/.graph", dir, {})?.telegramBotToken).toBe("GLOBAL");
+    const env = { GRAPHPILOT_TELEGRAM_BOT_TOKEN: "ENV", GRAPHPILOT_TELEGRAM_CHAT_ID: "9" };
+    expect(loadProjectSecrets("/x/yeni/.graph", dir, env)?.telegramBotToken).toBe("ENV");
+  });
+
+  it("projenin kendi kaydı ortam değişkeninden önce gelir", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gp-secrets-"));
+    writeSecretsFile({ telegramBotToken: "VERSO", telegramChatId: "3" }, dir, "/x/versoApp/.graph");
+    const env = { GRAPHPILOT_TELEGRAM_BOT_TOKEN: "ENV", GRAPHPILOT_TELEGRAM_CHAT_ID: "9" };
+    expect(loadProjectSecrets("/x/versoApp/.graph", dir, env)?.telegramBotToken).toBe("VERSO");
+  });
+
+  it("yalnız proje kaydı varken global okuma null döner", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gp-secrets-"));
+    writeSecretsFile({ telegramBotToken: "GP", telegramChatId: "2" }, dir, "/x/gp/.graph");
+    expect(readSecretsFile(dir)).toBeNull();
   });
 });

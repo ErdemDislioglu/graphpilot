@@ -64,11 +64,11 @@ import { runNodeHeadlessWithRetry } from "./runModeB.js";
 import { writeFileAtomic } from "./atomicWrite.js";
 import { existsSync, mkdirSync, readFileSync, openSync } from "node:fs";
 import { ConfigSchema } from "./schema/index.js";
-import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import { basename, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { runAutopilotLoop } from "./autopilot/autopilotLoop.js";
-import { loadSecrets, writeSecretsFile } from "./autopilot/secrets.js";
+import { loadProjectSecrets, projectKey, writeSecretsFile } from "./autopilot/secrets.js";
 import { checkLock, removeLock, writeLock } from "./autopilot/processLock.js";
 import { TelegramClient } from "./autopilot/telegramClient.js";
 import { TelegramPoller } from "./autopilot/telegramPoller.js";
@@ -883,7 +883,7 @@ export function buildCli(): Command {
   /** Faz 15 — Mod A'da epic bitince Telegram özeti (`workflow.notify_epic_done`). */
   async function notifyEpicsIfEnabled(graphRoot: string, epicIds: string[], config: Config): Promise<void> {
     if (!config.workflow.notify_epic_done || epicIds.length === 0) return;
-    const secrets = loadSecrets();
+    const secrets = loadProjectSecrets(graphRoot);
     if (!secrets) return;
     const client = new TelegramClient(secrets.telegramBotToken);
     await notifyEpicsDone(graphRoot, epicIds, config, (text) => client.sendMessage(secrets.telegramChatId, text));
@@ -1252,13 +1252,15 @@ export function buildCli(): Command {
       .command("setup")
       .description(
         "Telegram botunu bağlar: token'ı doğrular, bota gönderilecek /start'ı bekler, " +
-          "chat ID'yi ~/.graphpilot/secrets.json'a kaydeder, test mesajı yollar",
+          "chat ID'yi ~/.graphpilot/secrets.json'a BU PROJE için kaydeder (her projenin kendi " +
+          "botu olabilir), test mesajı yollar",
       ),
   )
     .requiredOption("--token <token>", "Telegram bot token'ı (@BotFather'dan alınır)")
     .option("--wait-seconds <n>", "'/start' için en fazla kaç saniye beklenir", (v) => Number(v), 30)
+    .option("--global", "projeye özel değil, kendi botu olmayan projelerin düştüğü global bot olarak kaydet")
     .action(
-      asyncAction(async (opts: BaseOpts & { token: string; waitSeconds: number }) => {
+      asyncAction(async (opts: BaseOpts & { token: string; waitSeconds: number; global?: boolean }) => {
         const client = new TelegramClient(opts.token);
         const me = await client.getMe();
         console.log(`✓ Bot doğrulandı: @${me.username ?? me.first_name}`);
@@ -1275,9 +1277,34 @@ export function buildCli(): Command {
           throw new Error(`${opts.waitSeconds}s içinde /start gelmedi — Telegram'da botu bulup tekrar dene`);
         }
 
-        writeSecretsFile({ telegramBotToken: opts.token, telegramChatId: String(chatId) });
-        await client.sendMessage(chatId, "✅ GraphPilot otopilot bağlandı.");
-        console.log(`✓ chat ID kaydedildi (${chatId}), test mesajı gönderildi.`);
+        const project = basename(projectKey(opts.graphRoot));
+        writeSecretsFile(
+          { telegramBotToken: opts.token, telegramChatId: String(chatId) },
+          undefined,
+          opts.global ? undefined : opts.graphRoot,
+        );
+        await client.sendMessage(
+          chatId,
+          opts.global ? "✅ GraphPilot otopilot bağlandı (global)." : `✅ GraphPilot otopilot bağlandı · proje: ${project}`,
+        );
+        console.log(
+          `✓ chat ID kaydedildi (${chatId}${opts.global ? ", global" : `, proje: ${projectKey(opts.graphRoot)}`}), test mesajı gönderildi.`,
+        );
+      }),
+    );
+
+  withGraphRoot(
+    autopilotCmd
+      .command("notify")
+      .description("Bu projenin Telegram sohbetine düz bir mesaj gönderir (projenin kendi botu yoksa global bota)"),
+  )
+    .argument("<text>", "gönderilecek mesaj")
+    .action(
+      asyncAction(async (text: string, opts: BaseOpts) => {
+        const secrets = loadProjectSecrets(opts.graphRoot);
+        if (!secrets) throw new Error("Telegram bağlı değil — önce 'gp autopilot setup --token <TOKEN>' çalıştır");
+        await new TelegramClient(secrets.telegramBotToken).sendMessage(secrets.telegramChatId, text);
+        output(opts, { sent: true }, () => "✓ gönderildi");
       }),
     );
 
@@ -1299,7 +1326,7 @@ export function buildCli(): Command {
         }
         const lock = checkLock(opts.graphRoot);
         if (lock.locked) throw new Error(`otopilot zaten çalışıyor (PID ${lock.info!.pid})`);
-        if (!loadSecrets()) {
+        if (!loadProjectSecrets(opts.graphRoot)) {
           throw new Error("Telegram bağlı değil — önce 'gp autopilot setup --token <TOKEN>' çalıştır");
         }
 
@@ -1381,7 +1408,7 @@ export function buildCli(): Command {
         try {
           const graph = loadGraph(opts);
           const config = loadConfig(graph);
-          const secrets = loadSecrets();
+          const secrets = loadProjectSecrets(opts.graphRoot);
           if (!secrets) throw new Error("Telegram secrets bulunamadı (~/.graphpilot/secrets.json)");
 
           const client = new TelegramClient(secrets.telegramBotToken);

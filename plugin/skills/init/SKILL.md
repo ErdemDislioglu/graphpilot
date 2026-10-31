@@ -31,15 +31,17 @@ sorabilirsin):
 `false` kalır, doğrudan 6. adıma geç.
 
 **"Evet"** ise:
-1. Kullanıcının bir bot token'ı var mı diye sor. Yoksa kısaca yönlendir: "Telegram'da
-   `@BotFather`'a yaz, `/newbot` komutunu çalıştır, sana verdiği token'ı buraya yapıştır."
+1. Kullanıcının **bu proje için** bir bot token'ı var mı diye sor (her projenin kendi
+   botu/sohbeti olur — bildirimler karışmaz; aynı bot iki otopilota bağlanırsa buton
+   cevapları çakışır). Yoksa kısaca yönlendir: "Telegram'da `@BotFather`'a yaz,
+   `/newbot` komutunu çalıştır (ör. adı `<proje>-gp-bot`), sana verdiği token'ı buraya yapıştır."
 2. Token'ı aldıktan sonra kullanıcıya NET söyle: *"Bu token sadece yerelde
-   `~/.graphpilot/secrets.json`'a kaydedilecek — projeye, graph'a ya da commit'e
-   GİRMEYECEK."* (roadmap 12.9'un güvenlik ilkesi — kullanıcıya şeffaf ol.)
+   `~/.graphpilot/secrets.json`'a bu projenin yoluyla kaydedilecek — projeye, graph'a ya
+   da commit'e GİRMEYECEK."* (roadmap 12.9'un güvenlik ilkesi — kullanıcıya şeffaf ol.)
 3. Çalıştır (token'ı **asla** `console.log`/dosyaya yazdırma, sadece bu komuta argüman
    olarak geçir):
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" autopilot setup --token <TOKEN> --json
+   node "${CLAUDE_PLUGIN_ROOT}/lib/bin.js" autopilot setup --token <TOKEN> -g <proje>/.graph --json
    ```
    Bu, token'ı doğrular, kullanıcının botuna Telegram'dan `/start` göndermesini bekler
    (en fazla 30s — kullanıcıya "şimdi Telegram'ı aç, botuna /start yaz" de), chat ID'yi
